@@ -3,3 +3,6 @@
 .nrepl-port
 .clj-kondo
 .lsp
+.shadow-cljs
+node_modules
+resources/public/js
