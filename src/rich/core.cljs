@@ -1,12 +1,17 @@
 (ns rich.core
-  (:require [helix.core :refer [<> defnc $]]
-            [helix.dom :as d]
-            [helix.hooks :as hooks]
-            ["react-dom" :as rdom]))
+  (:require [clojure.walk :as walk]
+            [applied-science.js-interop :as j]
+            [com.wotbrew.relic :as rel]
+            [reagent.core :as r]
+            [reagent.dom :as rdom]))
+
+(defn p [x] (prn x) x)
 
 (def content
   {:children [{:tag "div"
-               :children [{:text  "Some text"
+               :children [{:text  "Some text. "
+                           :style {:font-size "1em"}}
+                          {:text  "More text"
                            :style {:font-size "1em"}}]}]})
 
 (defn update-node [content path f]
@@ -20,26 +25,30 @@
 
 (def state (atom {}))
 
-;; define components using the `defnc` macro
-(defnc greeting
-  "A component which greets a user."
-  [{:keys [name]}]
-  ;; use helix.dom to create DOM elements
-  (d/div "Hello, " (d/strong name) "!"))
+(defn render-content [content]
+  (walk/prewalk (fn [node]
+                  (cond
+                    (:children node)
+                    (into [:div]
+                          (:children node))
+                    (vector? node)
+                    node
+                    (:text node)
+                    [:span (:text node)]
+                    :else
+                    (p node)))
+                content))
 
-(defnc app []
-  (let [[state set-state] (hooks/use-state {:name "Helix User"})]
-    (d/div
-     (d/h1 "Welcome!")
-      ;; create elements out of components
-     ($ greeting {:name (:name state)})
-     (d/input {:value (:name state)
-               :on-change #(set-state assoc :name (.. % -target -value))}))))
+(comment
+  (render-content content)
+  )
+
+(defn app []
+  [render-content content])
 
 (defn ^:dev/after-load start []
   (js/console.log "Starting...")
-  (rdom/render ($ app)
-               (js/document.getElementById "root")))
+  (rdom/render [app] (js/document.getElementById "root")))
 
 (defn ^:export init []
   (start))
