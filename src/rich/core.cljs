@@ -1,50 +1,84 @@
 (ns rich.core
   (:require [clojure.walk :as walk]
+            [hickory.core :as hick]
+            [hickory.zip :as hzip]
+            [clojure.string :as str]
             [applied-science.js-interop :as j]
             [com.wotbrew.relic :as rel]
             [reagent.core :as r]
             [reagent.dom :as rdom]))
 
 (defn p [x] (prn x) x)
+(enable-console-print!)
 
-(def content
-  {:children [{:tag "div"
-               :children [{:text  "Some text. "
-                           :style {:font-size "1em"}}
-                          {:text  "More text"
-                           :style {:font-size "1em"}}]}]})
+(def state (r/atom {:selection [[0 0 0] [0 0 0]]
+                    :value     [{:attrs   nil,
+                                 :content [{:attrs   {:style {:font-size "1em"
+                                                              :color "brown"}},
+                                            :content ["Some text"],
+                                            :tag     :span,
+                                            :type    :element}
+                                           {:attrs   {:style {:font-size "1em"}},
+                                            :content ["More text"],
+                                            :tag     :span,
+                                            :type    :element}],
+                                 :tag     :div,
+                                 :type    :element}]}))
+
+(defn at-path [path]
+  (vec (interpose :content path)))
 
 (defn update-node [content path f]
   (if (seq path)
-    (update-in content [:children (first path)] update-node (vec (rest path)) f)
-    (f content)))
-
-(defn write-text [content path text]
-  (update-node content path (fn [content]
-                              (update content :text #(str % text)))))
-
-(def state (atom {}))
-
-(defn render-content [content]
-  (walk/prewalk (fn [node]
-                  (cond
-                    (:children node)
-                    (into [:div]
-                          (:children node))
-                    (vector? node)
-                    node
-                    (:text node)
-                    [:span (:text node)]
-                    :else
-                    (p node)))
-                content))
+    (update-in content (at-path path) f)))
 
 (comment
-  (render-content content)
+  (at-path [0 0])
+  (vec (interpose :content [0 0 0]))
+  [0 :content 0])
+
+(defn insert-text [content {:keys [path text offset]}]
+  (update-in content (into (at-path path) [:content 0])
+             (fn [old-text]
+               (let [[before after] (split-at offset old-text)]
+                 (str/join (concat before (seq text) after))))))
+
+
+(comment
+  (def content (:value @state))
+  (insert-text content {:path [0 0] :text "...!" :offset 0})
   )
 
+(defn as-hiccup [content]
+  [:div
+   {:content-editable true
+    :on-before-input (fn [e]
+                       (.preventDefault e)
+                       (let [text (-> e .-data)]
+                         (swap! state update :value (fn [content]
+                                                      (insert-text content {:text   text
+                                                                            :path   [0 0]
+                                                                            :offset 0})))))}
+   (into [:<>]
+         (walk/prewalk (fn [node]
+                         (cond
+                           (:tag node)
+                           (-> [(:tag node)]
+                               (cond-> (:attrs node) (conj (:attrs node)))
+                               (cond-> (:content node) (into (:content node))))
+                           :else
+                           node))
+                       content))])
+
+(def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "root"))))
+
+(map hick/as-hickory parsed-doc)
+
+(comment
+  (as-hiccup (:value @state)))
+
 (defn app []
-  [render-content content])
+  [as-hiccup (:value @state)])
 
 (defn ^:dev/after-load start []
   (js/console.log "Starting...")
@@ -54,7 +88,6 @@
   (start))
 
 (comment
-  (write-text content [0 0] "....")
+  (insert-text content {:path [0 0 0] :text "...."})
   (update-node content [0 0] (fn [content]
-                               (update content :text #(str % "....."))))
-  )
+                               (update content :text #(str % ".....")))))
