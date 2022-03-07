@@ -11,19 +11,20 @@
 (defn p [x] (prn x) x)
 (enable-console-print!)
 
-(def state (r/atom {:selection [[0 0 0] [0 0 0]]
-                    :value     [{:attrs   nil,
-                                 :content [{:attrs   {:style {:font-size "1em"
-                                                              :color "brown"}},
-                                            :content ["Some text"],
-                                            :tag     :span,
-                                            :type    :element}
-                                           {:attrs   {:style {:font-size "1em"}},
-                                            :content ["More text"],
-                                            :tag     :span,
-                                            :type    :element}],
-                                 :tag     :div,
-                                 :type    :element}]}))
+(def state
+  (r/atom {:selection [[0 0 0] [0 0 0]]
+           :value     [{:attrs   nil,
+                        :content [{:attrs   {:style {:font-size "1em"
+                                                     :color "brown"}},
+                                   :content ["Some text"],
+                                   :tag     :span,
+                                   :type    :element}
+                                  {:attrs   {:style {:font-size "1em"}},
+                                   :content ["More text"],
+                                   :tag     :span,
+                                   :type    :element}],
+                        :tag     :div,
+                        :type    :element}]}))
 
 (defn at-path [path]
   (vec (interpose :content path)))
@@ -50,25 +51,28 @@
   )
 
 (defn as-hiccup [content]
-  [:div
-   {:content-editable true
-    :on-before-input (fn [e]
-                       (.preventDefault e)
-                       (let [text (-> e .-data)]
-                         (swap! state update :value (fn [content]
-                                                      (insert-text content {:text   text
-                                                                            :path   [0 0]
-                                                                            :offset 0})))))}
-   (into [:<>]
-         (walk/prewalk (fn [node]
-                         (cond
-                           (:tag node)
-                           (-> [(:tag node)]
-                               (cond-> (:attrs node) (conj (:attrs node)))
-                               (cond-> (:content node) (into (:content node))))
-                           :else
-                           node))
-                       content))])
+  (walk/prewalk (fn [node]
+                  (cond
+                    (:tag node)
+                    (-> [(:tag node)]
+                        (cond-> (:attrs node) (conj (:attrs node)))
+                        (cond-> (:content node) (into (:content node))))
+                    :else
+                    node))
+                content))
+
+(defn editable []
+  (let [content (:value @state)]
+    [:div
+     {:content-editable true
+      :on-before-input (fn [e]
+                         (.preventDefault e)
+                         (let [text (-> e .-data)]
+                           (swap! state update :value (fn [content]
+                                                        (insert-text content {:text   text
+                                                                              :path   [0 0]
+                                                                              :offset 0})))))}
+     (into [:<>] (as-hiccup content))]))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "root"))))
 
@@ -78,7 +82,7 @@
   (as-hiccup (:value @state)))
 
 (defn app []
-  [as-hiccup (:value @state)])
+  [editable])
 
 (defn ^:dev/after-load start []
   (js/console.log "Starting...")
