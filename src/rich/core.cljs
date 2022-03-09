@@ -8,7 +8,7 @@
             [reagent.core :as r]
             [reagent.dom :as rdom]))
 
-(defn p [x] (prn x) x)
+(defn p [x] (def x x) (prn x) x)
 (enable-console-print!)
 
 (def state
@@ -55,38 +55,62 @@
                   (cond
                     (:tag node)
                     (-> [(:tag node)]
-                        (cond-> (:attrs node) (conj (:attrs node)))
+                        (cond-> (:attrs node) (conj (assoc (:attrs node) :data-rich-node true)))
                         (cond-> (:content node) (into (:content node))))
                     :else
                     node))
                 content))
 
-(defn editable []
-  (let [content (:value @state)]
-    [:div
-     {:content-editable true
-      :on-before-input (fn [e]
-                         (.preventDefault e)
-                         (let [text (-> e .-data)]
-                           (swap! state update :value (fn [content]
-                                                        (insert-text content {:text   text
-                                                                              :path   [0 0]
-                                                                              :offset 0})))))}
-     (into [:<>] (as-hiccup content))]))
+(defn find-rich-node [target]
+  (.closest target "[data-rich-node]"))
 
-(def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "root"))))
+(defn rich-node? [target]
+  (.hasAttribute target "data-rich-node"))
 
-(map hick/as-hickory parsed-doc)
+(defn index-of-child [element]
+  (.indexOf (array-seq (.-children (.-parentElement element))) element))
+
+(defn path-to-node [element]
+  (if (not (rich-node? element))
+    []
+    (concat [(index-of-child element)] (path-to-node (.-parentElement element)))))
 
 (comment
   (as-hiccup (:value @state)))
+
+(defn editable []
+  (r/create-class
+   {:component-did-update
+    (fn [_]
+      (let [selection (.getSelection js/window)]
+        ; WIP
+        ))
+    :reagent-render
+    (fn []
+      (let [content (:value @state)]
+        [:div
+         {:content-editable true
+          :on-click (fn [e]
+                      (let [element (find-rich-node (.-target e))
+                            path    (vec (path-to-node element))]
+                        (swap! state assoc :selection path)))
+          :on-before-input (fn [e]
+                             (.preventDefault e)
+                             (let [text (.-data e)]
+                               (swap! state update :value (fn [content]
+                                                            (insert-text content {:text   text
+                                                                                  :path   [0 0]
+                                                                                  :offset 0})))))}
+         (into [:<>] (as-hiccup content))]))}))
+
+(def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
 
 (defn app []
   [editable])
 
 (defn ^:dev/after-load start []
   (js/console.log "Starting...")
-  (rdom/render [app] (js/document.getElementById "root")))
+  (rdom/render [app] (js/document.getElementById "app")))
 
 (defn ^:export init []
   (start))
