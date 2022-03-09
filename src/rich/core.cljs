@@ -73,35 +73,50 @@
 (defn path-to-node [element]
   (if (not (rich-node? element))
     []
-    (concat [(index-of-child element)] (path-to-node (.-parentElement element)))))
+    (into [(index-of-child element)] (path-to-node (.-parentElement element)))))
 
 (comment
   (as-hiccup (:value @state)))
 
 (defn editable []
-  (r/create-class
-   {:component-did-update
-    (fn [_]
-      (let [selection (.getSelection js/window)]
-        ; WIP
-        ))
-    :reagent-render
-    (fn []
-      (let [content (:value @state)]
-        [:div
-         {:content-editable true
-          :on-click (fn [e]
-                      (let [element (find-rich-node (.-target e))
-                            path    (vec (path-to-node element))]
-                        (swap! state assoc :selection path)))
-          :on-before-input (fn [e]
-                             (.preventDefault e)
-                             (let [text (.-data e)]
-                               (swap! state update :value (fn [content]
-                                                            (insert-text content {:text   text
-                                                                                  :path   [0 0]
-                                                                                  :offset 0})))))}
-         (into [:<>] (as-hiccup content))]))}))
+  (let [on-selection-change (fn []
+                              (let [selection (.getSelection js/window)
+                                    selection {:anchor-node   (.-parentElement (.-anchorNode selection))
+                                               :anchor-path   (p (path-to-node (.-parentElement (.-anchorNode selection))))
+                                               :anchor-offset (p (.-anchorOffset selection))
+                                               :focus-node    (.-parentElement (.-focusNode selection))
+                                               :focus-path    (p (path-to-node (.-parentElement (.-focusNode selection))))
+                                               :focus-offset  (p (.-focusOffset selection))}]
+                                (swap! state assoc :selection selection)))]
+    (r/create-class
+     {:component-did-mount
+      (fn [this]
+        (js/window.document.addEventListener "selectionchange" on-selection-change))
+      :component-will-unmount
+      (fn [this]
+        (js/document.removeEventListener "selectionchange" on-selection-change))
+    ;; :component-did-update
+    ;; (fn [_]
+    ;;   (let [selection (.getSelection js/window)]
+    ;;     ; WIP
+    ;;     ))
+      :reagent-render
+      (fn []
+        (let [content (:value @state)]
+          [:div
+           {:content-editable true
+            :on-click (fn [e]
+                        (let [element   (find-rich-node (.-target e))
+                              path      (vec (path-to-node element))]
+                          (swap! state assoc :path path)))
+            :on-before-input (fn [e]
+                               (.preventDefault e)
+                               (let [text (.-data e)]
+                                 (swap! state update :value (fn [content]
+                                                              (insert-text content {:text   text
+                                                                                    :path   [0 0]
+                                                                                    :offset 0})))))}
+           (into [:<>] (as-hiccup content))]))})))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
 
