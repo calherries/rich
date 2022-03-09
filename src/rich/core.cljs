@@ -13,7 +13,7 @@
 
 (def state
   (r/atom {:selection [[0 0 0] [0 0 0]]
-           :value     [{:attrs   nil,
+           :content   [{:attrs   nil,
                         :content [{:attrs   {:style {:font-size "1em"
                                                      :color "brown"}},
                                    :content ["Some text"],
@@ -43,7 +43,6 @@
              (fn [old-text]
                (let [[before after] (split-at offset old-text)]
                  (str/join (concat before (seq text) after))))))
-
 
 (comment
   (def content (:value @state))
@@ -81,13 +80,13 @@
 (defn editable []
   (let [on-selection-change (fn []
                               (let [selection (.getSelection js/window)
-                                    selection {:anchor-node   (.-parentElement (.-anchorNode selection))
-                                               :anchor-path   (p (path-to-node (.-parentElement (.-anchorNode selection))))
-                                               :anchor-offset (p (.-anchorOffset selection))
-                                               :focus-node    (.-parentElement (.-focusNode selection))
-                                               :focus-path    (p (path-to-node (.-parentElement (.-focusNode selection))))
-                                               :focus-offset  (p (.-focusOffset selection))}]
-                                (swap! state assoc :selection selection)))]
+                                    selection {:anchor-node   (.-anchorNode selection)
+                                               :anchor-path   (path-to-node (.-parentElement (.-anchorNode selection)))
+                                               :anchor-offset (.-anchorOffset selection)
+                                               :focus-node    (.-focusNode selection)
+                                               :focus-path    (path-to-node (.-parentElement (.-focusNode selection)))
+                                               :focus-offset  (.-focusOffset selection)}]
+                                (swap! state merge selection)))]
     (r/create-class
      {:component-did-mount
       (fn [this]
@@ -95,27 +94,43 @@
       :component-will-unmount
       (fn [this]
         (js/document.removeEventListener "selectionchange" on-selection-change))
-    ;; :component-did-update
-    ;; (fn [_]
-    ;;   (let [selection (.getSelection js/window)]
-    ;;     ; WIP
-    ;;     ))
+    :component-did-update
+    (fn [_]
+      ;; DOM selection is out of sync, so update it.
+      (let [start-offset  (:anchor-offset @state)
+            end-offset    (:focus-offset @state)
+            start-node    (:anchor-node @state)
+            end-node      (:focus-node @state)
+            dom-range     (js/window.document.createRange)
+            dom-selection (js/window.getSelection)]
+        (.setStart dom-range start-node start-offset)
+        (.setEnd dom-range end-node end-offset)
+        (.setBaseAndExtent dom-selection
+                           (.-startContainer dom-range)
+                           (.-startOffset dom-range)
+                           (.-endContainer dom-range)
+                           (.-endOffset dom-range))))
       :reagent-render
       (fn []
-        (let [content (:value @state)]
+        (let [content (:content @state)]
           [:div
            {:content-editable true
-            :on-click (fn [e]
-                        (let [element   (find-rich-node (.-target e))
-                              path      (vec (path-to-node element))]
-                          (swap! state assoc :path path)))
+            :suppress-content-editable-warning true
+            :on-click        (fn [e]
+                               (let [element   (find-rich-node (.-target e))
+                                     path      (vec (path-to-node element))]
+                                 (swap! state assoc :path path)))
             :on-before-input (fn [e]
                                (.preventDefault e)
                                (let [text (.-data e)]
-                                 (swap! state update :value (fn [content]
-                                                              (insert-text content {:text   text
-                                                                                    :path   [0 0]
-                                                                                    :offset 0})))))}
+                                 (swap! state (fn [state]
+                                                (-> state
+                                                    (update :content (fn [content]
+                                                                       (insert-text content {:text   text
+                                                                                             :path   (into [0] (get state :focus-path))
+                                                                                             :offset (get state :focus-offset)})))
+                                                    (update :anchor-offset #(+ % (count text)))
+                                                    (update :focus-offset #(+ % (count text))))))))}
            (into [:<>] (as-hiccup content))]))})))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
