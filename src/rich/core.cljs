@@ -75,7 +75,8 @@
     (into [(index-of-child element)] (path-to-node (.-parentElement element)))))
 
 (comment
-  (as-hiccup (:value @state)))
+  (as-hiccup (:value @state))
+  )
 
 (defn editable []
   (let [on-selection-change (fn []
@@ -94,43 +95,43 @@
       :component-will-unmount
       (fn [this]
         (js/document.removeEventListener "selectionchange" on-selection-change))
-    :component-did-update
-    (fn [_]
+      :component-did-update
+      (fn [_]
       ;; DOM selection is out of sync, so update it.
-      (let [start-offset  (:anchor-offset @state)
-            end-offset    (:focus-offset @state)
-            start-node    (:anchor-node @state)
-            end-node      (:focus-node @state)
-            dom-range     (js/window.document.createRange)
-            dom-selection (js/window.getSelection)]
-        (.setStart dom-range start-node start-offset)
-        (.setEnd dom-range end-node end-offset)
-        (.setBaseAndExtent dom-selection
-                           (.-startContainer dom-range)
-                           (.-startOffset dom-range)
-                           (.-endContainer dom-range)
-                           (.-endOffset dom-range))))
+        (let [start-offset  (:anchor-offset @state)
+              end-offset    (:focus-offset @state)
+              start-node    (:anchor-node @state)
+              end-node      (:focus-node @state)
+              dom-range     (js/window.document.createRange)
+              dom-selection (js/window.getSelection)]
+          (.setStart dom-range start-node start-offset)
+          (.setEnd dom-range end-node end-offset)
+          (.setBaseAndExtent dom-selection
+                             (.-startContainer dom-range)
+                             (.-startOffset dom-range)
+                             (.-endContainer dom-range)
+                             (.-endOffset dom-range))))
       :reagent-render
       (fn []
         (let [content (:content @state)]
           [:div
-           {:content-editable true
+           {:content-editable                  true
             :suppress-content-editable-warning true
-            :on-click        (fn [e]
-                               (let [element   (find-rich-node (.-target e))
-                                     path      (vec (path-to-node element))]
-                                 (swap! state assoc :path path)))
-            :on-before-input (fn [e]
-                               (.preventDefault e)
-                               (let [text (.-data e)]
-                                 (swap! state (fn [state]
-                                                (-> state
-                                                    (update :content (fn [content]
-                                                                       (insert-text content {:text   text
-                                                                                             :path   (into [0] (get state :focus-path))
-                                                                                             :offset (get state :focus-offset)})))
-                                                    (update :anchor-offset #(+ % (count text)))
-                                                    (update :focus-offset #(+ % (count text))))))))}
+            :on-click                          (fn [e]
+                                                 (let [element (find-rich-node (.-target e))
+                                                       path    (vec (path-to-node element))]
+                                                   (swap! state assoc :path path)))
+            :on-before-input                   (fn [e]
+                                                 (.preventDefault e)
+                                                 (let [text (.-data e)]
+                                                   (swap! state (fn [state]
+                                                                  (-> state
+                                                                      (update :content (fn [content]
+                                                                                         (insert-text content {:text   text
+                                                                                                               :path   (into [0] (get state :focus-path))
+                                                                                                               :offset (get state :focus-offset)})))
+                                                                      (update :anchor-offset #(+ % (count text)))
+                                                                      (update :focus-offset #(+ % (count text))))))))}
            (into [:<>] (as-hiccup content))]))})))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
