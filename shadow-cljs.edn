@@ -10,8 +10,7 @@
   {:target            :browser
    :devtools          {:preloads [lambdaisland.dom-types]}
    :modules           {:main {:init-fn rich.core/init}}
-   :module-hash-names true ; similar to ":fingerprint true", uses MD5 instead of SHA
-   :asset-path        "/js/studio"
+   :asset-path        "/js"
    :output-dir        "resources/public/js"
    :build-hooks       [(shadow.cljs.build-report/hook)]
    :release           {:output-dir "resources/public/js/release/rich"}}}}

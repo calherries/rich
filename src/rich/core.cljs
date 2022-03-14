@@ -126,12 +126,11 @@
                                                  (let [text (.-data e)]
                                                    (swap! state (fn [state]
                                                                   (-> state
-                                                                      (update :content (fn [content]
-                                                                                         (insert-text content {:text   text
-                                                                                                               :path   (into [0] (get state :focus-path))
-                                                                                                               :offset (get state :focus-offset)})))
-                                                                      (update :anchor-offset #(+ % (count text)))
-                                                                      (update :focus-offset #(+ % (count text))))))))}
+                                                                      (update :content insert-text {:text   text
+                                                                                                    :path   (into [0] (get state :focus-path))
+                                                                                                    :offset (get state :focus-offset)})
+                                                                      (update :anchor-offset + (count text))
+                                                                      (update :focus-offset + (count text)))))))}
            (into [:<>] (as-hiccup content))]))})))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
