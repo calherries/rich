@@ -12,8 +12,7 @@
 (enable-console-print!)
 
 (def state
-  (r/atom {:selection [[0 0 0] [0 0 0]]
-           :content   [{:attrs   nil,
+  (r/atom {:content   [{:attrs   nil,
                         :content [{:attrs   {:style {:font-size "1em"
                                                      :color "brown"}},
                                    :content ["Some text"],
@@ -25,6 +24,8 @@
                                    :type    :element}],
                         :tag     :div,
                         :type    :element}]}))
+
+;; (add-watch state :selection (fn [key ref old-state new-state] (js/console.log (select-keys new-state [:anchor :focus]))))
 
 (defn at-path [path]
   (vec (interpose :content path)))
@@ -78,16 +79,37 @@
   (as-hiccup (:value @state))
   )
 
+(defn rich-range-from-selection [{:keys [anchor focus]}]
+  (let [start-point (min-key (fn [point] [(:path point) (:offset point)]) anchor focus)
+        end-point   (if (= start-point anchor)
+                      focus
+                      anchor)]
+    {:start-point start-point
+     :end-point   end-point}))
+
+(defn select-paths [m paths]
+  (into {} (map (fn [p]
+                  [(last p) (get-in m p)]))
+        paths))
+
+(defn get-selection []
+  (let [selection (.getSelection js/window)]
+    (when (.-anchorNode selection)
+      {:anchor {:node   (.-anchorNode selection)
+                :path   (path-to-node (.-parentElement (.-anchorNode selection)))
+                :offset (.-anchorOffset selection)}
+       :focus  {:node   (.-focusNode selection)
+                :path   (path-to-node (.-parentElement (.-focusNode selection)))
+                :offset (.-focusOffset selection)}})))
+
 (defn editable []
   (let [on-selection-change (fn []
-                              (let [selection (.getSelection js/window)
-                                    selection {:anchor-node   (.-anchorNode selection)
-                                               :anchor-path   (path-to-node (.-parentElement (.-anchorNode selection)))
-                                               :anchor-offset (.-anchorOffset selection)
-                                               :focus-node    (.-focusNode selection)
-                                               :focus-path    (path-to-node (.-parentElement (.-focusNode selection)))
-                                               :focus-offset  (.-focusOffset selection)}]
-                                (swap! state merge selection)))]
+                              (when-let [selection (get-selection)]
+                                (let [selection-values (fn [s]
+                                                         (select-paths s [[:anchor :path] [:anchor :offset]
+                                                                          [:focus :path] [:focus :offset]]))]
+                                  (when (not= (selection-values selection) (selection-values @state))
+                                    (swap! state merge selection)))))]
     (r/create-class
      {:component-did-mount
       (fn [this]
@@ -96,31 +118,38 @@
       (fn [this]
         (js/document.removeEventListener "selectionchange" on-selection-change))
       :component-did-update
-      (fn [_]
-      ;; DOM selection is out of sync, so update it.
-        (let [start-offset  (:anchor-offset @state)
-              end-offset    (:focus-offset @state)
-              start-node    (:anchor-node @state)
-              end-node      (:focus-node @state)
-              dom-range     (js/window.document.createRange)
-              dom-selection (js/window.getSelection)]
-          (.setStart dom-range start-node start-offset)
-          (.setEnd dom-range end-node end-offset)
-          (.setBaseAndExtent dom-selection
-                             (.-startContainer dom-range)
-                             (.-startOffset dom-range)
-                             (.-endContainer dom-range)
-                             (.-endOffset dom-range))))
+      (fn [this]
+        ;; Check whether DOM selection is out of sync
+        (when-let [selection (get-selection)]
+          (let [selection-values (fn [s]
+                                   (select-paths s [[:anchor :path] [:anchor :offset]
+                                                    [:focus :path] [:focus :offset]]))]
+            ;; DOM selection is out of sync, so update it.
+            (when (not= (selection-values selection) (selection-values @state))
+              (let [{:keys [start-point end-point]} (rich-range-from-selection @state)
+                    dom-range     (js/window.document.createRange)
+                    dom-selection (js/window.getSelection)]
+                (.setStart dom-range (:node start-point) (:offset start-point))
+                (.setEnd dom-range (:node end-point) (:offset end-point))
+                (.setBaseAndExtent dom-selection
+                                   (.-startContainer dom-range)
+                                   (.-startOffset dom-range)
+                                   (.-endContainer dom-range)
+                                   (.-endOffset dom-range)))))))
       :reagent-render
       (fn []
         (let [content (:content @state)]
           [:div
            {:content-editable                  true
             :suppress-content-editable-warning true
-            :on-click                          (fn [e]
-                                                 (let [element (find-rich-node (.-target e))
-                                                       path    (vec (path-to-node element))]
-                                                   (swap! state assoc :path path)))
+            :on-key-down  (fn [e]
+                            (when (and (= (.-key e) "b") (.-metaKey e))
+                              (js/console.log "bold")
+                              #_(swap! state (fn [state]
+                                               (update state :content
+                                                       (transform-range content  (fn [range]
+                                                                                   (if (:bold (universal-marks content range))
+                                                                                     (set-marks marks)))))))))
             :on-before-input                   (fn [e]
                                                  (.preventDefault e)
                                                  (let [text (.-data e)]
