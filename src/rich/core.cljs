@@ -76,7 +76,7 @@
     (into [(index-of-child element)] (path-to-node (.-parentElement element)))))
 
 (comment
-  (as-hiccup (:value @state))
+  (as-hiccup (:content @state))
   )
 
 (defn rich-range-from-selection [{:keys [anchor focus]}]
@@ -144,7 +144,6 @@
             :suppress-content-editable-warning true
             :on-key-down  (fn [e]
                             (when (and (= (.-key e) "b") (.-metaKey e))
-                              (js/console.log "bold")
                               #_(swap! state (fn [state]
                                                (update state :content
                                                        (transform-range content  (fn [range]
@@ -156,10 +155,10 @@
                                                    (swap! state (fn [state]
                                                                   (-> state
                                                                       (update :content insert-text {:text   text
-                                                                                                    :path   (into [0] (get state :focus-path))
-                                                                                                    :offset (get state :focus-offset)})
-                                                                      (update :anchor-offset + (count text))
-                                                                      (update :focus-offset + (count text)))))))}
+                                                                                                    :path   (into [0] (get-in state [:focus :path]))
+                                                                                                    :offset (get-in state [:focus :offset])})
+                                                                      (update-in [:anchor :offset] + (count text))
+                                                                      (update-in [:focus :offset] + (count text)))))))}
            (into [:<>] (as-hiccup content))]))})))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
