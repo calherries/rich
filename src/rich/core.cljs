@@ -67,10 +67,11 @@
   [0 :content 0])
 
 (defn insert-text [content {:keys [path text offset]}]
-  (update-in content (at-path (conj path 0))
-             (fn [old-text]
-               (let [[before after] (split-at offset old-text)]
-                 (str/join (concat before (seq text) after))))))
+  (update-text content path
+               (fn [old-text]
+                 (js/console.log old-text)
+                 (let [[before after] (split-at offset old-text)]
+                   (str/join (concat before (seq text) after))))))
 
 (comment
   (def content (:content @state))
@@ -210,10 +211,10 @@
 (defn delete-backwards [content {:keys [path offset unit]}]
   (if (= offset 0)
     (delete-backwards content {:path nil})
-    (update-in content (p (into (at-path path) [:content 0]))
-               (fn [old-text]
-                 (let [[before after] (split-at offset old-text)]
-                   (str/join (concat (str/join (butlast (seq before))) after)))))))
+    (update-text content path
+                 (fn [old-text]
+                   (let [[before after] (split-at offset old-text)]
+                     (str/join (concat (str/join (butlast (seq before))) after)))))))
 
 (comment
   (get-in (:content @state) [0 ])
@@ -273,6 +274,12 @@
   (contains? [1 2 3] 0)
   )
 
+(defn delete-selection [state]
+  (let [state (update state :content delete-range state)]
+    (if (backwards-selection? state)
+      (assoc state :anchor (:focus state))
+      (assoc state :focus (:anchor state)))))
+
 (defn editable []
   (let [on-selection-change (fn []
                               (when-let [selection (get-selection)]
@@ -319,10 +326,21 @@
             ;;                   (swap! state (fn [state]
             ;;                                  (let [selection-range (rich-range-from-selection state)]
             ;;                                    (update state :content set-in-range selection-range [:style :font-size] "bold"))))))
+            :on-paste
+            (fn [e]
+              (.preventDefault e)
+              (let [text (-> e .-clipboardData (.getData "Text"))]
+                (swap! state (fn [state]
+                               (-> state
+                                   (cond-> (selection? state) delete-selection)
+                                   (update :content insert-text {:text   text
+                                                                 :path   (get-in state [:focus :path])
+                                                                 :offset (get-in state [:focus :offset])})
+                                   (update-in [:anchor :offset] + (count text))
+                                   (update-in [:focus :offset] + (count text)))))))
             :on-before-input
             (fn [e]
               (.preventDefault e)
-              (js/console.log "on-before-input")
               (let [text (.-data e)]
                 (swap! state (fn [state]
                                (-> state
@@ -336,10 +354,7 @@
                         (.preventDefault e)
                         (swap! state (fn [state]
                                        (if (selection? state)
-                                         (let [state (update state :content delete-range state)]
-                                           (if (backwards-selection? state)
-                                             (assoc state :anchor (:focus state))
-                                             (assoc state :focus (:anchor state))))
+                                         (delete-selection state)
                                          (-> state
                                              (update :content delete-backwards {:unit   "char"
                                                                                 :path   (get-in state [:focus :path])
