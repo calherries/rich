@@ -28,11 +28,6 @@
 
 ;; (add-watch state :selection (fn [key ref old-state new-state] (js/console.log (select-keys new-state [:anchor :focus]))))
 
-
-(comment
-  (-> (hzip/hickory-zip (first (:content @state)))
-      zip/next zip/next))
-
 (defn dissoc-in
   "Dissociate a value in a nested associative structure, identified by a sequence
   of keys. Any collections left empty by the operation will be dissociated from
@@ -61,11 +56,6 @@
 (defn update-text [content path f]
   (update-node content (conj path 0) f))
 
-(comment
-  (at-path [0 0])
-  (vec (interpose :content [0 0 0]))
-  [0 :content 0])
-
 (defn insert-text [content {:keys [path text offset]}]
   (update-text content path
                (fn [old-text]
@@ -83,7 +73,9 @@
                     (:tag node)
                     (-> [(:tag node)]
                         (cond-> (:attrs node) (conj (assoc (:attrs node) :data-rich-node true)))
-                        (cond-> (:content node) (into (:content node))))
+                        (cond-> (:content node) (into (if (= (:content node) [""])
+                                                        ["\uFEFF"]
+                                                        (:content node)))))
                     :else
                     node))
                 content))
@@ -121,11 +113,9 @@
 (defn get-selection []
   (let [selection (.getSelection js/window)]
     (when (.-anchorNode selection)
-      {:anchor {:node   (.-anchorNode selection)
-                :path   (path-to-node (.-parentElement (.-anchorNode selection)))
+      {:anchor {:path   (path-to-node (.-parentElement (.-anchorNode selection)))
                 :offset (.-anchorOffset selection)}
-       :focus  {:node   (.-focusNode selection)
-                :path   (path-to-node (.-parentElement (.-focusNode selection)))
+       :focus  {:path   (path-to-node (.-parentElement (.-focusNode selection)))
                 :offset (.-focusOffset selection)}})))
 
 (defn zip-next-seq
@@ -147,14 +137,14 @@
 (defn leaf-zips-after
   "Returns all leaf nodes after loc, inclusive."
   [loc]
-  (filter (complement zip/branch?) ;filter only non-branch nodes
+  (filter #(string? (first (:content (zip/node %)))) ; filter only leaf nodes
           (take-while (complement zip/end?) ;take until the :end
                       (iterate zip/next loc))))
 
 (defn leaf-zips-before
   "Returns all leaf nodes before loc, inclusive."
   [loc]
-  (filter (complement zip/branch?) ;filter only non-branch nodes
+  (filter #(string? (first (:content (zip/node %)))) ; filter only leaf nodes
           (take-while (complement nil?) ;take until the root
                       (iterate zip/prev loc))))
 
@@ -197,32 +187,32 @@
   (paths-between (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0] [1 2])
   )
 
-(comment
-  (dissoc-in-content (:content @state) [0]))
-
-(defn set-in-range [content range path value])
-
-(defn move-range [content {:keys [path offset] :as range} distance]
-  )
-
 (defn backwards-selection? [{:keys [anchor focus]}]
   (pos? (compare (conj (:path anchor) (:offset anchor)) (conj (:path focus) (:offset focus)))))
 
-(defn delete-backwards [content {:keys [path offset unit]}]
+(defn delete-backwards [state {:keys [path offset unit]}]
   (if (= offset 0)
-    (delete-backwards content {:path nil})
-    (update-text content path
-                 (fn [old-text]
-                   (let [[before after] (split-at offset old-text)]
-                     (str/join (concat (str/join (butlast (seq before))) after)))))))
-
-(comment
-  (get-in (:content @state) [0 ])
-  (let [{:keys [content]} @state
-        {:keys [start-point end-point] :as range} (rich-range-from-selection @state)
-        #_elements-in-range #_(elements-in-range content range)]
-    (get-in content (at-path (:path start-point))))
-  )
+    (let [prev-zip (second (leaf-zips-before (get-in-zip (hzip/hickory-zip (:content state)) path)))]
+      (if (nil? prev-zip)
+        state ; Do nothing, we are at the beginning of the first leaf.
+        (let [prev-path    (path-to-zipper prev-zip)
+              prev-node    (zip/node prev-zip)
+              text-content (first (:content prev-node))]
+          (delete-backwards (-> state
+                                (assoc :anchor {:path   prev-path
+                                                :offset (count text-content)})
+                                (assoc :focus {:path   prev-path
+                                               :offset (count text-content)}))
+                            {:path   prev-path
+                             :offset (count text-content)
+                             :unit   unit}))))
+    (-> state
+        (assoc-in [:anchor :offset] (dec offset))
+        (assoc-in [:focus :offset] (dec offset))
+        (update :content update-text path
+                (fn [old-text]
+                  (let [[before after] (split-at offset old-text)]
+                    (str/join (concat (str/join (butlast (seq before))) after))))))))
 
 (defn selection? [{:keys [anchor focus]}]
   (not= anchor focus))
@@ -265,20 +255,21 @@
                       (update-text (:path end-point) (fn [s] (subs s (:offset end-point))))))]
     (reduce dissoc-in-content content paths)))
 
-(comment
-  (vec-remove [1 2 3] 2)
-  (dissoc-in-remove {:a [1 2 3]} [:a 0])
-  (delete-range (:content @state) @state)
-  (update-node (:content @state) [0 0] (fn [s] "Here"))
-  (rest '())
-  (contains? [1 2 3] 0)
-  )
-
 (defn delete-selection [state]
   (let [state (update state :content delete-range state)]
     (if (backwards-selection? state)
       (assoc state :anchor (:focus state))
       (assoc state :focus (:anchor state)))))
+
+(defn find-dom-node [path]
+  (let [editor     (js/document.getElementById "rich-editable")
+        loop-fn    (fn loop-fn [node path]
+                     (if (seq path)
+                       (loop-fn (aget (.-childNodes node) (first path))
+                                (rest path))
+                       node))
+        start-node (-> editor .-childNodes (aget 0))]
+    (loop-fn start-node path)))
 
 (defn editable []
   (let [on-selection-change (fn []
@@ -287,14 +278,54 @@
                                                          (select-paths s [[:anchor :path] [:anchor :offset]
                                                                           [:focus :path] [:focus :offset]]))]
                                   (when (not= (selection-values selection) (selection-values @state))
-                                    (swap! state merge selection)))))]
+                                    (swap! state merge selection)))))
+        on-before-input (fn [e]
+                          (.preventDefault e)
+                          (let [text (.-data e)
+                                type (.-inputType e)]
+                            (case type
+                              "insertText"
+                              (swap! state (fn [state]
+                                             (-> state
+                                                 (update :content insert-text {:text   text
+                                                                               :path   (get-in state [:focus :path])
+                                                                               :offset (get-in state [:focus :offset])})
+                                                 (update-in [:anchor :offset] + (count text))
+                                                 (update-in [:focus :offset] + (count text)))))
+                              "deleteContentBackward"
+                              (swap! state (fn [state]
+                                             (if (selection? state)
+                                               (delete-selection state)
+                                               (delete-backwards state {:unit   "char"
+                                                                        :path   (get-in state [:focus :path])
+                                                                        :offset (get-in state [:focus :offset])}))))
+
+                              "deleteSoftLineBackward"
+                              ;; TODO
+                              (swap! state (fn [state]
+                                             (if (selection? state)
+                                               (delete-selection state)
+                                               (delete-backwards state {:unit   "char"
+                                                                        :path   (get-in state [:focus :path])
+                                                                        :offset (get-in state [:focus :offset])}))))
+
+                              "deleteWordBackward"
+                              ;; TODO
+                              (swap! state (fn [state]
+                                             (if (selection? state)
+                                               (delete-selection state)
+                                               (delete-backwards state {:unit   "char"
+                                                                        :path   (get-in state [:focus :path])
+                                                                        :offset (get-in state [:focus :offset])})))))))]
     (r/create-class
      {:component-did-mount
       (fn [this]
-        (js/window.document.addEventListener "selectionchange" on-selection-change))
+        (js/window.document.addEventListener "selectionchange" on-selection-change)
+        (.addEventListener (rdom/dom-node this) "beforeinput" on-before-input))
       :component-will-unmount
       (fn [this]
-        (js/document.removeEventListener "selectionchange" on-selection-change))
+        (js/document.removeEventListener "selectionchange" on-selection-change)
+        (.removeEventListener (rdom/dom-node this) "beforeinput" on-before-input))
       :component-did-update
       (fn [this]
         ;; Check whether DOM selection is out of sync
@@ -307,8 +338,9 @@
               (let [{:keys [start-point end-point]} (rich-range-from-selection @state)
                     dom-range     (js/window.document.createRange)
                     dom-selection (js/window.getSelection)]
-                (.setStart dom-range (:node start-point) (:offset start-point))
-                (.setEnd dom-range (:node end-point) (:offset end-point))
+                ;; WIP: need to be able to get node from point
+                (.setStart dom-range (find-dom-node (conj (:path start-point) 0)) (:offset start-point))
+                (.setEnd dom-range (find-dom-node (conj (:path end-point) 0)) (:offset end-point))
                 (.setBaseAndExtent dom-selection
                                    (.-startContainer dom-range)
                                    (.-startOffset dom-range)
@@ -318,7 +350,8 @@
       (fn []
         (let [content (:content @state)]
           [:div
-           {:content-editable                  true
+           {:id "rich-editable"
+            :content-editable                  true
             :suppress-content-editable-warning true
             ;; :on-key-down  (fn [e]
             ;;                 (when (and (= (.-key e) "b") (.-metaKey e))
@@ -326,41 +359,18 @@
             ;;                   (swap! state (fn [state]
             ;;                                  (let [selection-range (rich-range-from-selection state)]
             ;;                                    (update state :content set-in-range selection-range [:style :font-size] "bold"))))))
-            :on-paste
-            (fn [e]
-              (.preventDefault e)
-              (let [text (-> e .-clipboardData (.getData "Text"))]
-                (swap! state (fn [state]
-                               (-> state
-                                   (cond-> (selection? state) delete-selection)
-                                   (update :content insert-text {:text   text
-                                                                 :path   (get-in state [:focus :path])
-                                                                 :offset (get-in state [:focus :offset])})
-                                   (update-in [:anchor :offset] + (count text))
-                                   (update-in [:focus :offset] + (count text)))))))
-            :on-before-input
-            (fn [e]
-              (.preventDefault e)
-              (let [text (.-data e)]
-                (swap! state (fn [state]
-                               (-> state
-                                   (update :content insert-text {:text   text
-                                                                 :path   (get-in state [:focus :path])
-                                                                 :offset (get-in state [:focus :offset])})
-                                   (update-in [:anchor :offset] + (count text))
-                                   (update-in [:focus :offset] + (count text)))))))
-            ;; on-input fires when the delete key is pressed
-            :on-input (fn [e]
-                        (.preventDefault e)
-                        (swap! state (fn [state]
-                                       (if (selection? state)
-                                         (delete-selection state)
-                                         (-> state
-                                             (update :content delete-backwards {:unit   "char"
-                                                                                :path   (get-in state [:focus :path])
-                                                                                :offset (get-in state [:focus :offset])})
-                                             (update-in [:anchor :offset] - 1)
-                                             (update-in [:focus :offset] - 1))))))}
+            :on-paste    (fn [e]
+                           (.preventDefault e)
+                           (let [text (-> e .-clipboardData (.getData "Text"))]
+                             (swap! state
+                                    (fn [state]
+                                      (-> state
+                                          (cond-> (selection? state) delete-selection)
+                                          (update :content insert-text {:text   text
+                                                                        :path   (get-in state [:focus :path])
+                                                                        :offset (get-in state [:focus :offset])})
+                                          (update-in [:anchor :offset] + (count text))
+                                          (update-in [:focus :offset] + (count text)))))))}
            (into (as-hiccup content))]))})))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
