@@ -58,7 +58,6 @@
 (defn insert-text [content {:keys [path text offset]}]
   (update-text content path
                (fn [old-text]
-                 (js/console.log old-text)
                  (let [[before after] (split-at offset old-text)]
                    (str/join (concat before (seq text) after))))))
 
@@ -111,7 +110,8 @@
 
 (defn get-selection []
   (let [selection (.getSelection js/window)]
-    (when (.-anchorNode selection)
+    (when (and (.-anchorNode selection)
+               (.closest (.-parentElement (.-anchorNode selection)) "#rich-editable"))
       {:anchor {:path   (path-to-node (.-parentElement (.-anchorNode selection)))
                 :offset (.-anchorOffset selection)}
        :focus  {:path   (path-to-node (.-parentElement (.-focusNode selection)))
@@ -260,8 +260,11 @@
       (assoc state :anchor (:focus state))
       (assoc state :focus (:anchor state)))))
 
+(defn get-editor []
+  (js/document.getElementById "rich-editable"))
+
 (defn find-dom-node [path]
-  (let [editor     (js/document.getElementById "rich-editable")
+  (let [editor     (get-editor)
         loop-fn    (fn loop-fn [node path]
                      (if (seq path)
                        (loop-fn (aget (.-childNodes node) (first path))
@@ -327,7 +330,6 @@
         (.removeEventListener (rdom/dom-node this) "beforeinput" on-before-input))
       :component-did-update
       (fn [this]
-        ;; Check whether DOM selection is out of sync
         (when-let [selection (get-selection)]
           (let [selection-values (fn [s]
                                    (select-paths s [[:anchor :path] [:anchor :offset]
