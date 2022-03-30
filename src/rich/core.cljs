@@ -273,6 +273,42 @@
         start-node (-> editor .-childNodes (aget 0))]
     (loop-fn start-node path)))
 
+(defn update-range [state update-fn]
+  (let [content                         (:content state)
+        {:keys [start-point end-point]} (rich-range-from-selection state)]
+    (if (= (:path start-point) (:path end-point))
+      (let [content-zip       (hzip/hickory-zip content)
+            original-node-zip (get-in-zip content-zip (:path start-point))
+            original-node     (zip/node original-node-zip)
+            original-text     (first (:content original-node))
+            before-text       (subs original-text 0 (:offset start-point))
+            split-text        (subs original-text (:offset start-point) (:offset end-point))
+            split-node        (update-fn (assoc original-node :content [split-text]))
+            after-text        (subs original-text (:offset end-point))
+            split-node-zip    (if (not-empty before-text)
+                                (-> original-node-zip
+                                    (zip/replace (assoc original-node :content [before-text]))
+                                    (zip/insert-right split-node)
+                                    (zip/right))
+                                (-> original-node-zip
+                                    (zip/replace split-node)))
+            content          (-> split-node-zip
+                                 (cond-> (not-empty after-text)
+                                  (zip/insert-right (assoc original-node :content [after-text])))
+                                 (zip/root))
+            start-point        {:path   (path-to-zipper split-node-zip)
+                                :offset 0}
+            end-point          {:path   (path-to-zipper split-node-zip)
+                                :offset (count split-text)}
+            [anchor focus]     (if (backwards-selection? state)
+                                 [end-point start-point]
+                                 [start-point end-point])]
+        (-> state
+            (merge {:content content
+                    :anchor  anchor
+                    :focus   focus})))
+      state)))
+
 (defn editable []
   (let [on-selection-change (fn []
                               (when-let [selection (get-selection)]
@@ -356,12 +392,14 @@
             :suppress-content-editable-warning true
             :width                             "100%"
             :height                            "100%"
-            ;; :on-key-down  (fn [e]
-            ;;                 (when (and (= (.-key e) "b") (.-metaKey e))
-            ;;                   (.preventDefault e)
-            ;;                   (swap! state (fn [state]
-            ;;                                  (let [selection-range (rich-range-from-selection state)]
-            ;;                                    (update state :content set-in-range selection-range [:style :font-size] "bold"))))))
+            :on-key-down  (fn [e]
+                            (when (and (= (.-key e) "b") (.-metaKey e))
+                              (.preventDefault e)
+                              (swap! state (fn [state]
+                                             (update-range state (fn [node]
+                                                                   (if (= (get-in node [:attrs :style :font-weight]) "bold")
+                                                                     (dissoc-in node [:attrs :style :font-weight])
+                                                                     (assoc-in node [:attrs :style :font-weight] "bold"))))))))
             :on-paste                          (fn [e]
                                                  (.preventDefault e)
                                                  (let [text (-> e .-clipboardData (.getData "Text"))]
