@@ -1,5 +1,6 @@
 (ns rich.core
   (:require [clojure.walk :as walk]
+            [clojure.pprint :as pprint]
             [clojure.zip :as zip]
             [hickory.core :as hick]
             [hickory.zip :as hzip]
@@ -25,8 +26,6 @@
                                 :type    :element}],
                      :tag     :div,
                      :type    :element}}))
-
-;; (add-watch state :selection (fn [key ref old-state new-state] (js/console.log (select-keys new-state [:anchor :focus]))))
 
 (defn dissoc-in
   "Dissociate a value in a nested associative structure, identified by a sequence
@@ -350,33 +349,48 @@
       (fn []
         (let [content (:content @state)]
           [:div
-           {:id "rich-editable"
+           {:id                                "rich-editable"
             :content-editable                  true
             :suppress-content-editable-warning true
+            :width                             "100%"
+            :height                            "100%"
             ;; :on-key-down  (fn [e]
             ;;                 (when (and (= (.-key e) "b") (.-metaKey e))
             ;;                   (.preventDefault e)
             ;;                   (swap! state (fn [state]
             ;;                                  (let [selection-range (rich-range-from-selection state)]
             ;;                                    (update state :content set-in-range selection-range [:style :font-size] "bold"))))))
-            :on-paste    (fn [e]
-                           (.preventDefault e)
-                           (let [text (-> e .-clipboardData (.getData "Text"))]
-                             (swap! state
-                                    (fn [state]
-                                      (-> state
-                                          (cond-> (selection? state) delete-selection)
-                                          (update :content insert-text {:text   text
-                                                                        :path   (get-in state [:focus :path])
-                                                                        :offset (get-in state [:focus :offset])})
-                                          (update-in [:anchor :offset] + (count text))
-                                          (update-in [:focus :offset] + (count text)))))))}
+            :on-paste                          (fn [e]
+                                                 (.preventDefault e)
+                                                 (let [text (-> e .-clipboardData (.getData "Text"))]
+                                                   (swap! state
+                                                          (fn [state]
+                                                            (-> state
+                                                                (cond-> (selection? state) delete-selection)
+                                                                (update :content insert-text {:text   text
+                                                                                              :path   (get-in state [:focus :path])
+                                                                                              :offset (get-in state [:focus :offset])})
+                                                                (update-in [:anchor :offset] + (count text))
+                                                                (update-in [:focus :offset] + (count text)))))))}
            (into (as-hiccup content))]))})))
 
 (def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
 
 (defn app []
-  [editable])
+  [:div {:style {:padding "10px"
+                 :display "flex"
+                 :flex-direction "row"}}
+   [:div {:style {:width       "50%"
+                  :min-height  "100px"
+                  :border      "2px solid black"
+                  :white-space "pre-wrap"}}
+    [editable]]
+   [:div {:style {:width "50%"
+                  :min-height "100px"
+                  :border "2px solid black"
+                  :white-space "pre-wrap"}}
+    [:p (with-out-str (pprint/pprint @state))]]])
+
 
 (defn ^:dev/after-load start []
   (js/console.log "Starting...")
