@@ -27,6 +27,18 @@
                      :tag     :div,
                      :type    :element}}))
 
+(defn hickory-zip
+  "Returns a zipper for html dom maps (as from as-hickory),
+  given a root element."
+  [root]
+  (zip/zipper (fn [node]
+                (and (not (string? node))
+                     (not (string? (first (:content node))))))
+              (comp seq :content)
+              (fn [node children]
+                (assoc node :content (and children (apply vector children))))
+              root))
+
 (defn dissoc-in
   "Dissociate a value in a nested associative structure, identified by a sequence
   of keys. Any collections left empty by the operation will be dissociated from
@@ -136,16 +148,22 @@
 (defn leaf-zips-after
   "Returns all leaf nodes after loc, inclusive."
   [loc]
-  (filter #(string? (first (:content (zip/node %)))) ; filter only leaf nodes
+  (filter (complement zip/branch?) ; filter only leaf nodes
           (take-while (complement zip/end?) ;take until the :end
                       (iterate zip/next loc))))
 
 (defn leaf-zips-before
   "Returns all leaf nodes before loc, inclusive."
   [loc]
-  (filter #(string? (first (:content (zip/node %)))) ; filter only leaf nodes
+  (filter (complement zip/branch?) ; filter only leaf nodes
           (take-while (complement nil?) ;take until the root
                       (iterate zip/prev loc))))
+
+(defn next-leaf [node]
+  (second (leaf-zips-after node)))
+
+(defn prev-leaf [node]
+  (second (leaf-zips-before node)))
 
 (defn path-to-zipper [zipper]
   (if (nil? (zip/path zipper))
@@ -191,7 +209,7 @@
 
 (defn delete-backwards [state {:keys [path offset unit]}]
   (if (= offset 0)
-    (let [prev-zip (second (leaf-zips-before (get-in-zip (hzip/hickory-zip (:content state)) path)))]
+    (let [prev-zip (second (leaf-zips-before (get-in-zip (hickory-zip (:content state)) path)))]
       (if (nil? prev-zip)
         state ; Do nothing, we are at the beginning of the first leaf.
         (let [prev-path    (path-to-zipper prev-zip)
@@ -243,7 +261,7 @@
 (defn delete-range [content selection]
   (let [{:keys [start-point
                 end-point]} (rich-range-from-selection selection)
-        paths           (->> (paths-between (hzip/hickory-zip content) (:path start-point) (:path end-point))
+        paths           (->> (paths-between (hickory-zip content) (:path start-point) (:path end-point))
                              butlast
                              rest)
         content (if (= (:path start-point) (:path end-point))
@@ -277,7 +295,7 @@
   (let [content                         (:content state)
         {:keys [start-point end-point]} (rich-range-from-selection state)]
     (if (= (:path start-point) (:path end-point))
-      (let [content-zip       (hzip/hickory-zip content)
+      (let [content-zip                     (hickory-zip content)
             original-node-zip (get-in-zip content-zip (:path start-point))
             original-node     (zip/node original-node-zip)
             original-text     (first (:content original-node))
@@ -292,22 +310,65 @@
                                     (zip/right))
                                 (-> original-node-zip
                                     (zip/replace split-node)))
-            content          (-> split-node-zip
-                                 (cond-> (not-empty after-text)
-                                  (zip/insert-right (assoc original-node :content [after-text])))
-                                 (zip/root))
-            start-point        {:path   (path-to-zipper split-node-zip)
-                                :offset 0}
-            end-point          {:path   (path-to-zipper split-node-zip)
-                                :offset (count split-text)}
-            [anchor focus]     (if (backwards-selection? state)
-                                 [end-point start-point]
-                                 [start-point end-point])]
+            content           (-> split-node-zip
+                                  (cond-> (not-empty after-text)
+                                    (zip/insert-right (assoc original-node :content [after-text])))
+                                  (zip/root))
+            start-point       {:path   (path-to-zipper split-node-zip)
+                               :offset 0}
+            end-point         {:path   (path-to-zipper split-node-zip)
+                               :offset (count split-text)}
+            [anchor focus]    (if (backwards-selection? state)
+                                [end-point start-point]
+                                [start-point end-point])]
         (-> state
             (merge {:content content
                     :anchor  anchor
                     :focus   focus})))
-      state)))
+      ;; if start and end are on different nodes
+      (let [content              (assoc-in content (conj (at-path (:path end-point)) :end-point-flag) true)
+            content-zip          (hickory-zip content)
+            start-node-zip       (get-in-zip content-zip (:path start-point))
+            start-node           (zip/node start-node-zip)
+            start-text           (first (:content start-node))
+            start-before-text    (subs start-text 0 (:offset start-point))
+            start-split-text     (subs start-text (:offset start-point))
+            start-split-node     (update-fn (assoc start-node :content [start-split-text]))
+            start-split-node-zip (if (not-empty start-before-text)
+                                   (-> start-node-zip
+                                       (zip/replace (assoc start-node :content [start-before-text]))
+                                       (zip/insert-right start-split-node)
+                                       (zip/right))
+                                   (-> start-node-zip
+                                       (zip/replace start-split-node)))
+            end-split-node-zip   (loop [node start-split-node-zip]
+                                   (if (:end-point-flag (zip/node node))
+                                     (zip/edit node dissoc :end-point-flag)
+                                     (let [next-node (next-leaf node)]
+                                       (recur (cond-> next-node
+                                                (nil? (:end-point-flag (zip/node next-node)))
+                                                (zip/edit update-fn))))))
+            end-split-node       (zip/node end-split-node-zip)
+            end-text             (first (:content end-split-node))
+            end-split-text       (subs end-text 0 (:offset end-point))
+            end-after-text       (subs end-text (:offset end-point))
+            content              (-> end-split-node-zip
+                                     (zip/edit update-fn)
+                                     (zip/edit assoc :content [end-split-text])
+                                     (cond-> (not-empty end-after-text)
+                                       (zip/insert-right (assoc end-split-node :content [end-after-text])))
+                                     (zip/root))
+            start-point          {:path   (path-to-zipper start-split-node-zip)
+                                  :offset 0}
+            end-point            {:path   (path-to-zipper end-split-node-zip)
+                                  :offset (count end-split-text)}
+            [anchor focus]    (if (backwards-selection? state)
+                                [end-point start-point]
+                                [start-point end-point])]
+        (-> state
+            (merge {:content content
+                    :anchor  anchor
+                    :focus   focus}))))))
 
 (defn editable []
   (let [on-selection-change (fn []
