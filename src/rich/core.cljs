@@ -330,6 +330,14 @@
                                                                                :offset (get-in state [:focus :offset])})
                                                  (update-in [:anchor :offset] + (count text))
                                                  (update-in [:focus :offset] + (count text)))))
+                              "insertParagraph"
+                              (swap! state (fn [state]
+                                             (-> state
+                                                 (update :content insert-text {:text   "\n"
+                                                                               :path   (get-in state [:focus :path])
+                                                                               :offset (get-in state [:focus :offset])})
+                                                 (update-in [:anchor :offset] inc)
+                                                 (update-in [:focus :offset] inc))))
                               "deleteContentBackward"
                               (swap! state (fn [state]
                                              (if (selection? state)
