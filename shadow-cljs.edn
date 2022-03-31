@@ -9,7 +9,7 @@
  {:app
   {:target            :browser
    :devtools          {:preloads [lambdaisland.dom-types]}
-   :modules           {:main {:init-fn rich.core/init}}
+   :modules           {:main {:init-fn rich.app/init}}
    :asset-path        "/js"
    :output-dir        "resources/public/js"
    :build-hooks       [(shadow.cljs.build-report/hook)]

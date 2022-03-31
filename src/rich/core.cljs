@@ -1,12 +1,9 @@
 (ns rich.core
-  (:require [clojure.walk :as walk]
-            [clojure.pprint :as pprint]
-            [clojure.zip :as zip]
-            [hickory.core :as hick]
-            [hickory.zip :as hzip]
+  (:require [applied-science.js-interop :as j]
+            [clojure.data :as data]
             [clojure.string :as str]
-            [applied-science.js-interop :as j]
-            [com.wotbrew.relic :as rel]
+            [clojure.walk :as walk]
+            [clojure.zip :as zip]
             [reagent.core :as r]
             [reagent.dom :as rdom]))
 
@@ -15,13 +12,8 @@
 
 (def state
   (r/atom {:content {:attrs   nil,
-                     :content [{:attrs   {:style {:font-size "1em"
-                                                  :color "brown"}},
-                                :content ["Some text"],
-                                :tag     :span,
-                                :type    :element}
-                               {:attrs   {:style {:font-size "1em"}},
-                                :content ["More text"],
+                     :content [{:attrs   {:style {:font-size "1em"}},
+                                :content ["Type something awesome"],
                                 :tag     :span,
                                 :type    :element}],
                      :tag     :div,
@@ -108,10 +100,11 @@
   (as-hiccup (:content @state)))
 
 (defn rich-range-from-selection [{:keys [anchor focus]}]
-  (let [start-point (min-key (fn [point] [(:path point) (:offset point)]) anchor focus)
-        end-point   (if (= start-point anchor)
-                      focus
-                      anchor)]
+  (let [[start-point end-point] (if (= (compare [(:path anchor) (:offset anchor)]
+                                                [(:path focus) (:offset focus)])
+                                       -1)
+                                  [anchor focus]
+                                  [focus anchor])]
     {:start-point start-point
      :end-point   end-point}))
 
@@ -295,7 +288,7 @@
   (let [content                         (:content state)
         {:keys [start-point end-point]} (rich-range-from-selection state)]
     (if (= (:path start-point) (:path end-point))
-      (let [content-zip                     (hickory-zip content)
+      (let [content-zip       (hickory-zip content)
             original-node-zip (get-in-zip content-zip (:path start-point))
             original-node     (zip/node original-node-zip)
             original-text     (first (:content original-node))
@@ -370,6 +363,26 @@
                     :anchor  anchor
                     :focus   focus}))))))
 
+(defn things-in-both
+  "Recursively diffs a and b to find the common values. Maps are subdiffed where keys match and values differ."
+  [a b]
+  (nth (data/diff a b) 2))
+
+(defn universal-leaf-attrs [content start-path stop-path]
+  (let [leaf-nodes (->> (leaf-zips-between (hickory-zip content) start-path stop-path)
+                        (map (comp :attr zip/node)))]
+    (reduce things-in-both leaf-nodes)))
+
+(defn universal-leaf-attrs-in-selection [state]
+  (let [content (:content state)
+        {:keys [start-point end-point]} (rich-range-from-selection state)]
+    (universal-leaf-attrs content start-point end-point)))
+
+;; (defn universal-block-props [node start-path stop-path]
+;;   (let [block-nodes (->> (block-zips-between node start-path stop-path)
+;;                          (map :attr))]
+;;     (reduce things-in-both block-nodes)))
+
 (defn editable []
   (let [on-selection-change (fn []
                               (when-let [selection (get-selection)]
@@ -378,52 +391,50 @@
                                                                           [:focus :path] [:focus :offset]]))]
                                   (when (not= (selection-values selection) (selection-values @state))
                                     (swap! state merge selection)))))
-        on-before-input (fn [e]
-                          (.preventDefault e)
-                          (let [text (.-data e)
-                                type (.-inputType e)]
-                            (case type
-                              "insertText"
-                              (swap! state (fn [state]
-                                             (-> state
-                                                 (update :content insert-text {:text   text
-                                                                               :path   (get-in state [:focus :path])
-                                                                               :offset (get-in state [:focus :offset])})
-                                                 (update-in [:anchor :offset] + (count text))
-                                                 (update-in [:focus :offset] + (count text)))))
-                              "insertParagraph"
-                              (swap! state (fn [state]
-                                             (-> state
-                                                 (update :content insert-text {:text   "\n"
-                                                                               :path   (get-in state [:focus :path])
-                                                                               :offset (get-in state [:focus :offset])})
-                                                 (update-in [:anchor :offset] inc)
-                                                 (update-in [:focus :offset] inc))))
-                              "deleteContentBackward"
-                              (swap! state (fn [state]
-                                             (if (selection? state)
-                                               (delete-selection state)
-                                               (delete-backwards state {:unit   "char"
-                                                                        :path   (get-in state [:focus :path])
-                                                                        :offset (get-in state [:focus :offset])}))))
+        on-before-input     (fn [e]
+                              (.preventDefault e)
+                              (let [text (.-data e)
+                                    type (.-inputType e)]
+                                (case type
+                                  "insertText"
+                                  (swap! state (fn [state]
+                                                 (-> state
+                                                     (update :content insert-text {:text   text
+                                                                                   :path   (get-in state [:focus :path])
+                                                                                   :offset (get-in state [:focus :offset])})
+                                                     (update-in [:anchor :offset] + (count text))
+                                                     (update-in [:focus :offset] + (count text)))))
+                                  "insertParagraph"
+                                  (swap! state (fn [state]
+                                                 (-> state
+                                                     (update :content insert-text {:text   "\n"
+                                                                                   :path   (get-in state [:focus :path])
+                                                                                   :offset (get-in state [:focus :offset])})
+                                                     (update-in [:anchor :offset] inc)
+                                                     (update-in [:focus :offset] inc))))
+                                  "deleteContentBackward"
+                                  (swap! state (fn [state]
+                                                 (if (selection? state)
+                                                   (delete-selection state)
+                                                   (delete-backwards state {:unit   "char"
+                                                                            :path   (get-in state [:focus :path])
+                                                                            :offset (get-in state [:focus :offset])}))))
 
-                              "deleteSoftLineBackward"
-                              ;; TODO
-                              (swap! state (fn [state]
-                                             (if (selection? state)
-                                               (delete-selection state)
-                                               (delete-backwards state {:unit   "char"
-                                                                        :path   (get-in state [:focus :path])
-                                                                        :offset (get-in state [:focus :offset])}))))
+                                  "deleteSoftLineBackward"
+                                  (swap! state (fn [state]
+                                                 (if (selection? state)
+                                                   (delete-selection state)
+                                                   (delete-backwards state {:unit   "char"
+                                                                            :path   (get-in state [:focus :path])
+                                                                            :offset (get-in state [:focus :offset])}))))
 
-                              "deleteWordBackward"
-                              ;; TODO
-                              (swap! state (fn [state]
-                                             (if (selection? state)
-                                               (delete-selection state)
-                                               (delete-backwards state {:unit   "char"
-                                                                        :path   (get-in state [:focus :path])
-                                                                        :offset (get-in state [:focus :offset])})))))))]
+                                  "deleteWordBackward"
+                                  (swap! state (fn [state]
+                                                 (if (selection? state)
+                                                   (delete-selection state)
+                                                   (delete-backwards state {:unit   "char"
+                                                                            :path   (get-in state [:focus :path])
+                                                                            :offset (get-in state [:focus :offset])})))))))]
     (r/create-class
      {:component-did-mount
       (fn [this]
@@ -482,31 +493,6 @@
                                                                 (update-in [:anchor :offset] + (count text))
                                                                 (update-in [:focus :offset] + (count text)))))))}
            (into (as-hiccup content))]))})))
-
-(def parsed-doc (hick/parse-fragment (.-outerHTML (js/document.getElementById "app"))))
-
-(defn app []
-  [:div {:style {:padding "10px"
-                 :display "flex"
-                 :flex-direction "row"}}
-   [:div {:style {:width       "50%"
-                  :min-height  "100px"
-                  :border      "2px solid black"
-                  :white-space "pre-wrap"}}
-    [editable]]
-   [:div {:style {:width "50%"
-                  :min-height "100px"
-                  :border "2px solid black"
-                  :white-space "pre-wrap"}}
-    [:p (with-out-str (pprint/pprint @state))]]])
-
-
-(defn ^:dev/after-load start []
-  (js/console.log "Starting...")
-  (rdom/render [app] (js/document.getElementById "app")))
-
-(defn ^:export init []
-  (start))
 
 (comment
   (insert-text content {:path [0 0 0] :text "...."})
