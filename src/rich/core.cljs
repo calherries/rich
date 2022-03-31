@@ -455,7 +455,6 @@
               (let [{:keys [start-point end-point]} (rich-range-from-selection @state)
                     dom-range     (js/window.document.createRange)
                     dom-selection (js/window.getSelection)]
-                ;; WIP: need to be able to get node from point
                 (.setStart dom-range (find-dom-node (conj (:path start-point) 0)) (:offset start-point))
                 (.setEnd dom-range (find-dom-node (conj (:path end-point) 0)) (:offset end-point))
                 (.setBaseAndExtent dom-selection
