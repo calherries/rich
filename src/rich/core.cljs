@@ -378,11 +378,6 @@
         {:keys [start-point end-point]} (rich-range-from-selection state)]
     (universal-leaf-attrs content start-point end-point)))
 
-;; (defn universal-block-props [node start-path stop-path]
-;;   (let [block-nodes (->> (block-zips-between node start-path stop-path)
-;;                          (map :attr))]
-;;     (reduce things-in-both block-nodes)))
-
 (defn editable []
   (let [on-selection-change (fn []
                               (when-let [selection (get-selection)]
@@ -469,8 +464,8 @@
            {:id                                "rich-editable"
             :content-editable                  true
             :suppress-content-editable-warning true
-            :width                             "100%"
-            :height                            "100%"
+            :width        "100%"
+            :height       "100%"
             :on-key-down  (fn [e]
                             (when (and (= (.-key e) "b") (.-metaKey e))
                               (.preventDefault e)
@@ -479,21 +474,16 @@
                                                                    (if (= (get-in node [:attrs :style :font-weight]) "bold")
                                                                      (dissoc-in node [:attrs :style :font-weight])
                                                                      (assoc-in node [:attrs :style :font-weight] "bold"))))))))
-            :on-paste                          (fn [e]
-                                                 (.preventDefault e)
-                                                 (let [text (-> e .-clipboardData (.getData "Text"))]
-                                                   (swap! state
-                                                          (fn [state]
-                                                            (-> state
-                                                                (cond-> (selection? state) delete-selection)
-                                                                (update :content insert-text {:text   text
-                                                                                              :path   (get-in state [:focus :path])
-                                                                                              :offset (get-in state [:focus :offset])})
-                                                                (update-in [:anchor :offset] + (count text))
-                                                                (update-in [:focus :offset] + (count text)))))))}
+            :on-paste     (fn [e]
+                            (.preventDefault e)
+                            (let [text (-> e .-clipboardData (.getData "Text"))]
+                              (swap! state
+                                     (fn [state]
+                                       (-> state
+                                           (cond-> (selection? state) delete-selection)
+                                           (update :content insert-text {:text   text
+                                                                         :path   (get-in state [:focus :path])
+                                                                         :offset (get-in state [:focus :offset])})
+                                           (update-in [:anchor :offset] + (count text))
+                                           (update-in [:focus :offset] + (count text)))))))}
            (into (as-hiccup content))]))})))
-
-(comment
-  (insert-text content {:path [0 0 0] :text "...."})
-  (update-node content [0 0] (fn [content]
-                               (update content :text #(str % ".....")))))
