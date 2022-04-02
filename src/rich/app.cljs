@@ -16,7 +16,7 @@
                   :min-height "100px"
                   :border "2px solid black"
                   :white-space "pre-wrap"}}
-    [:p (with-out-str (pprint/pprint @rich/state))]]])
+    [:p (with-out-str (pprint/pprint (update @rich/state :content rich/as-hiccup)))]]])
 
 
 (defn ^:dev/after-load start []
