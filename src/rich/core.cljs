@@ -206,8 +206,7 @@
   (leaf-zips-after (get-in-zip (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0]))
   (path-to-zip (get-in-zip (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0]))
   (leaf-zips-between (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0] [1 2])
-  (paths-between (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0] [1 2])
-  )
+  (paths-between (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0] [1 2]))
 
 (defn backwards-selection? [{:keys [anchor focus]}]
   (lexicographic-less-than [(:path focus) (:offset focus)]
@@ -298,8 +297,8 @@
     (loop-fn start-node path)))
 
 (defn mergeable? [node-a node-b]
-    (= (select-keys node-a [:attrs :tag])
-       (select-keys node-b [:attrs :tag])))
+  (= (select-keys node-a [:attrs :tag])
+     (select-keys node-b [:attrs :tag])))
 
 (defn merge-right [zip]
   (let [next-zip  (zip/right zip)
@@ -543,12 +542,10 @@
 
 (defn editable []
   (let [on-selection-change (fn []
+                              (swap! state dissoc :active-attrs :remove-attrs)
                               (when-let [selection (get-selection)]
-                                (let [selection-values (fn [s]
-                                                         (select-paths s [[:anchor :path] [:anchor :offset]
-                                                                          [:focus :path] [:focus :offset]]))]
-                                  (when (not= (selection-values selection) (selection-values @state))
-                                    (swap! state merge selection)))))
+                                (when (not= selection (select-keys @state [:anchor :focus]))
+                                  (swap! state merge selection))))
         on-before-input     (fn [e]
                               (.preventDefault e)
                               (let [text (.-data e)
@@ -556,12 +553,41 @@
                                 (case type
                                   "insertText"
                                   (swap! state (fn [state]
-                                                 (-> state
-                                                     (update :content insert-text {:text   text
-                                                                                   :path   (get-in state [:focus :path])
-                                                                                   :offset (get-in state [:focus :offset])})
-                                                     (update-in [:anchor :offset] + (count text))
-                                                     (update-in [:focus :offset] + (count text)))))
+                                                 (cond
+                                                   (:remove-attrs state)
+                                                   (let [state (-> state
+                                                                   (update-range (fn [node]
+                                                                                   (assoc node :attrs {})))
+                                                                   (assoc-in [:anchor :offset] 0)
+                                                                   (assoc-in [:focus :offset] 0))]
+                                                     (-> state
+                                                         (update :content insert-text {:text   text
+                                                                                       :path   (get-in state [:focus :path])
+                                                                                       :offset (get-in state [:focus :offset])})
+                                                         (update-in [:anchor :offset] + (count text))
+                                                         (update-in [:focus :offset] + (count text))
+                                                         (dissoc :remove-attrs)))
+                                                   (:active-attrs state)
+                                                   (let [state (-> state
+                                                                   (update-range (fn [node]
+                                                                                   (assoc node :attrs (:active-attrs state))))
+                                                                   (assoc-in [:anchor :offset] 0)
+                                                                   (assoc-in [:focus :offset] 0))]
+
+                                                     (-> state
+                                                         (update :content insert-text {:text   text
+                                                                                       :path   (get-in state [:focus :path])
+                                                                                       :offset (get-in state [:focus :offset])})
+                                                         (update-in [:anchor :offset] + (count text))
+                                                         (update-in [:focus :offset] + (count text))
+                                                         (dissoc :active-attrs)))
+                                                   :else
+                                                   (-> state
+                                                       (update :content insert-text {:text   text
+                                                                                     :path   (get-in state [:focus :path])
+                                                                                     :offset (get-in state [:focus :offset])})
+                                                       (update-in [:anchor :offset] + (count text))
+                                                       (update-in [:focus :offset] + (count text))))))
                                   "insertParagraph"
                                   (swap! state (fn [state]
                                                  (-> state
@@ -633,17 +659,57 @@
                             (when (and (= (.-key e) "b") (.-metaKey e))
                               (.preventDefault e)
                               (swap! state (fn [state]
-                                             (update-range state (fn [node]
-                                                                   (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-weight]) "bold")
-                                                                     (dissoc-in node [:attrs :style :font-weight])
-                                                                     (assoc-in node [:attrs :style :font-weight] "bold")))))))
+                                             (if (selection? state)
+                                               (update-range state (fn [node]
+                                                                     (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-weight]) "bold")
+                                                                       (update node :attrs (fn [attrs]
+                                                                                             ;; attrs must be an empty map, not nil
+                                                                                             (or (dissoc-in attrs [:style :font-weight])
+                                                                                                 {})))
+                                                                       (assoc-in node [:attrs :style :font-weight] "bold"))))
+                                               (if (or (= (get-in (:active-attrs state) [:style :font-weight]) "bold")
+                                                       (and (= (-> (get-in (:content state) (at-path (get-in state [:anchor :path])))
+                                                                   (get-in [:attrs :style :font-weight]))
+                                                               "bold")
+                                                            (not (:remove-attrs state))))
+                                                 (-> state
+                                                     (assoc :active-attrs (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path])))))
+                                                     (dissoc-in [:active-attrs :style :font-weight])
+                                                     (as-> x (if (and (empty? (get-in x [:active-attrs]))
+                                                                      (not-empty (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))))
+                                                               (assoc x :remove-attrs true)
+                                                               x)))
+                                                 (-> state
+                                                     (dissoc :remove-attrs)
+                                                     (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))
+                                                                                    [:style :font-weight] "bold"))))))))
                             (when (and (= (.-key e) "i") (.-metaKey e))
                               (.preventDefault e)
                               (swap! state (fn [state]
-                                             (update-range state (fn [node]
-                                                                   (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-style]) "italic")
-                                                                     (dissoc-in node [:attrs :style :font-style])
-                                                                     (assoc-in node [:attrs :style :font-style] "italic"))))))))
+                                             (if (selection? state)
+                                               (update-range state (fn [node]
+                                                                     (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-style]) "italic")
+                                                                       (update node :attrs (fn [attrs]
+                                                                                             ;; attrs must be an empty map, not nil
+                                                                                             (or (dissoc-in attrs [:style :font-style])
+                                                                                                 {})))
+                                                                       (assoc-in node [:attrs :style :font-style] "italic"))))
+                                               (if (or (= (get-in (:active-attrs state) [:style :font-style]) "italic")
+                                                       (and (= (-> (get-in (:content state) (at-path (get-in state [:anchor :path])))
+                                                                   (get-in [:attrs :style :font-style]))
+                                                               "italic")
+                                                            (not (:remove-attrs state))))
+                                                 (-> state
+                                                     (assoc :active-attrs (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path])))))
+                                                     (dissoc-in [:active-attrs :style :font-style])
+                                                     (as-> x (if (and (empty? (get-in x [:active-attrs]))
+                                                                      (not-empty (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))))
+                                                               (assoc x :remove-attrs true)
+                                                               x)))
+                                                 (-> state
+                                                     (dissoc :remove-attrs)
+                                                     (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))
+                                                                                    [:style :font-style] "italic")))))))))
             :on-paste     (fn [e]
                             (.preventDefault e)
                             (let [text (-> e .-clipboardData (.getData "Text"))]
