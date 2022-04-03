@@ -503,9 +503,43 @@
     (reduce things-in-both leaf-nodes)))
 
 (defn universal-leaf-attrs-in-selection [state]
-  (let [content (:content state)
+  (let [content                         (:content state)
         {:keys [start-point end-point]} (rich-range-from-selection state)]
-    (universal-leaf-attrs content start-point end-point)))
+    (universal-leaf-attrs content (:path start-point) (:path end-point))))
+
+(comment
+  (let [state {:anchor {:offset 12, :path [0]},
+               :content {:attrs {},
+                         :content [{:attrs {:style {:font-size "1em"}},
+                                    :content ["Type something awesome"],
+                                    :tag :span,
+                                    :type :element}],
+                         :tag :div,
+                         :type :element},
+               :focus {:offset 19, :path [0]}}]
+    (universal-leaf-attrs-in-selection state))
+  ;; => {:style {:font-size "1em"}}
+  (let [state {:anchor {:offset 0, :path [1]},
+               :content {:attrs {},
+                         :content [{:attrs {:style {:font-size "1em"}},
+                                    :content ["Type someth"],
+                                    :tag :span,
+                                    :type :element}
+                                   {:attrs {:style
+                                            {:font-size "1em", :font-weight "bold"}},
+                                    :content ["ing awe"],
+                                    :tag :span,
+                                    :type :element}
+                                   {:attrs {:style {:font-size "1em"}},
+                                    :content ["some"],
+                                    :tag :span,
+                                    :type :element}],
+                         :tag :div,
+                         :type :element},
+               :focus {:offset 7, :path [1]}}]
+    (universal-leaf-attrs-in-selection state))
+  ;; => {:style {:font-size "1em", :font-weight "bold"}}
+  )
 
 (defn editable []
   (let [on-selection-change (fn []
@@ -600,7 +634,7 @@
                               (.preventDefault e)
                               (swap! state (fn [state]
                                              (update-range state (fn [node]
-                                                                   (if (= (get-in node [:attrs :style :font-weight]) "bold")
+                                                                   (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-weight]) "bold")
                                                                      (dissoc-in node [:attrs :style :font-weight])
                                                                      (assoc-in node [:attrs :style :font-weight] "bold"))))))))
             :on-paste     (fn [e]
