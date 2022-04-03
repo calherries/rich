@@ -12,7 +12,7 @@
 
 (def state
   (r/atom {:content {:attrs   {},
-                     :content [{:attrs   {:style {:font-size "1em"}}
+                     :content [{:attrs   {}
                                 :content ["Type something awesome"],
                                 :tag     :span,
                                 :type    :element}],
@@ -89,7 +89,7 @@
                   (cond
                     (:tag node)
                     (-> [(:tag node)]
-                        (cond-> (:attrs node) (conj (:attrs node)))
+                        (cond-> (not-empty (:attrs node)) (conj (:attrs node)))
                         (cond-> (:content node) (into (:content node))))
                     :else
                     node))
@@ -636,7 +636,14 @@
                                              (update-range state (fn [node]
                                                                    (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-weight]) "bold")
                                                                      (dissoc-in node [:attrs :style :font-weight])
-                                                                     (assoc-in node [:attrs :style :font-weight] "bold"))))))))
+                                                                     (assoc-in node [:attrs :style :font-weight] "bold")))))))
+                            (when (and (= (.-key e) "i") (.-metaKey e))
+                              (.preventDefault e)
+                              (swap! state (fn [state]
+                                             (update-range state (fn [node]
+                                                                   (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-style]) "italic")
+                                                                     (dissoc-in node [:attrs :style :font-style])
+                                                                     (assoc-in node [:attrs :style :font-style] "italic"))))))))
             :on-paste     (fn [e]
                             (.preventDefault e)
                             (let [text (-> e .-clipboardData (.getData "Text"))]
