@@ -366,10 +366,14 @@
                                         :anchor anchor
                                         :focus  focus}
                                        (if (nil? (zip/right zip))
-                                         (recur {:zip      (next-leaf zip)
-                                                 :anchor   anchor
-                                                 :focus    focus
-                                                 :end-path end-path})
+                                         (if-let [next-zip (next-leaf zip)]
+                                           (recur {:zip      next-zip
+                                                   :anchor   anchor
+                                                   :focus    focus
+                                                   :end-path end-path})
+                                           {:zip    zip
+                                            :anchor anchor
+                                            :focus  focus})
                                          (let [next-zip (zip/right zip)]
                                            (recur (if (mergeable? (zip/node zip)
                                                                   (zip/node next-zip))
