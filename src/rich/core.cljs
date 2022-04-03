@@ -540,6 +540,32 @@
   ;; => {:style {:font-size "1em", :font-weight "bold"}}
   )
 
+(defn selection-toggle-attr [state attr-path value]
+  (if (selection? state)
+   (update-range state (fn [node]
+                         (if (= (get-in (universal-leaf-attrs-in-selection state) attr-path) value)
+                           (update node :attrs (fn [attrs]
+                                                                                             ;; attrs must be an empty map, not nil
+                                                 (or (dissoc-in attrs attr-path)
+                                                     {})))
+                           (assoc-in node (into [:attrs] attr-path) value))))
+   (if (or (= (get-in (:active-attrs state) attr-path) value)
+           (and (= (-> (get-in (:content state) (at-path (get-in state [:anchor :path])))
+                       (get-in (into [:attrs] attr-path)))
+                   value)
+                (not (:remove-attrs state))))
+     (-> state
+         (assoc :active-attrs (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path])))))
+         (dissoc-in (into [:active-attrs] attr-path))
+         (as-> x (if (and (empty? (get-in x [:active-attrs]))
+                          (not-empty (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))))
+                   (assoc x :remove-attrs true)
+                   x)))
+     (-> state
+         (dissoc :remove-attrs)
+         (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))
+                                        attr-path value))))))
+
 (defn editable []
   (let [on-selection-change (fn []
                               (swap! state dissoc :active-attrs :remove-attrs)
@@ -658,58 +684,10 @@
             :on-key-down  (fn [e]
                             (when (and (= (.-key e) "b") (.-metaKey e))
                               (.preventDefault e)
-                              (swap! state (fn [state]
-                                             (if (selection? state)
-                                               (update-range state (fn [node]
-                                                                     (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-weight]) "bold")
-                                                                       (update node :attrs (fn [attrs]
-                                                                                             ;; attrs must be an empty map, not nil
-                                                                                             (or (dissoc-in attrs [:style :font-weight])
-                                                                                                 {})))
-                                                                       (assoc-in node [:attrs :style :font-weight] "bold"))))
-                                               (if (or (= (get-in (:active-attrs state) [:style :font-weight]) "bold")
-                                                       (and (= (-> (get-in (:content state) (at-path (get-in state [:anchor :path])))
-                                                                   (get-in [:attrs :style :font-weight]))
-                                                               "bold")
-                                                            (not (:remove-attrs state))))
-                                                 (-> state
-                                                     (assoc :active-attrs (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path])))))
-                                                     (dissoc-in [:active-attrs :style :font-weight])
-                                                     (as-> x (if (and (empty? (get-in x [:active-attrs]))
-                                                                      (not-empty (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))))
-                                                               (assoc x :remove-attrs true)
-                                                               x)))
-                                                 (-> state
-                                                     (dissoc :remove-attrs)
-                                                     (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))
-                                                                                    [:style :font-weight] "bold"))))))))
+                              (swap! state selection-toggle-attr [:style :font-weight] "bold"))
                             (when (and (= (.-key e) "i") (.-metaKey e))
                               (.preventDefault e)
-                              (swap! state (fn [state]
-                                             (if (selection? state)
-                                               (update-range state (fn [node]
-                                                                     (if (= (get-in (universal-leaf-attrs-in-selection state) [:style :font-style]) "italic")
-                                                                       (update node :attrs (fn [attrs]
-                                                                                             ;; attrs must be an empty map, not nil
-                                                                                             (or (dissoc-in attrs [:style :font-style])
-                                                                                                 {})))
-                                                                       (assoc-in node [:attrs :style :font-style] "italic"))))
-                                               (if (or (= (get-in (:active-attrs state) [:style :font-style]) "italic")
-                                                       (and (= (-> (get-in (:content state) (at-path (get-in state [:anchor :path])))
-                                                                   (get-in [:attrs :style :font-style]))
-                                                               "italic")
-                                                            (not (:remove-attrs state))))
-                                                 (-> state
-                                                     (assoc :active-attrs (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path])))))
-                                                     (dissoc-in [:active-attrs :style :font-style])
-                                                     (as-> x (if (and (empty? (get-in x [:active-attrs]))
-                                                                      (not-empty (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))))
-                                                               (assoc x :remove-attrs true)
-                                                               x)))
-                                                 (-> state
-                                                     (dissoc :remove-attrs)
-                                                     (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (at-path (get-in state [:anchor :path]))))
-                                                                                    [:style :font-style] "italic")))))))))
+                              (swap! state selection-toggle-attr [:style :font-style] "italic")))
             :on-paste     (fn [e]
                             (.preventDefault e)
                             (let [text (-> e .-clipboardData (.getData "Text"))]
