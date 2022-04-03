@@ -11,7 +11,7 @@
 (enable-console-print!)
 
 (def state
-  (r/atom {:content {:attrs   nil,
+  (r/atom {:content {:attrs   {},
                      :content [{:attrs   {:style {:font-size "1em"}}
                                 :content ["Type something awesome"],
                                 :tag     :span,
@@ -67,6 +67,8 @@
 
 (comment
   (def content (:content @state))
+  (get-in content (at-path [0 0]))
+  (editable-hiccup content)
   (insert-text content {:path [0 0] :text "...!" :offset 0}))
 
 (defn editable-hiccup [content]
@@ -103,9 +105,9 @@
   (.indexOf (array-seq (.-children (.-parentElement element))) element))
 
 (defn path-to-node [element]
-  (if (not (rich-node? element))
-    []
-    (into [(index-of-child element)] (path-to-node (.-parentElement element)))))
+  (if (rich-node? (.-parentElement element))
+    (into [(index-of-child element)] (path-to-node (.-parentElement element)))
+    []))
 
 (defn lexicographic-less-than [a b]
   (= (compare a b) -1))
@@ -435,7 +437,7 @@
                                        :anchor  anchor
                                        :focus   focus}))
             path-left-of-start (path-left (:path start-point))]
-        (merge-right-from state (or path-left-of-start (:path start-point)) (p (:path end-point))))
+        (merge-right-from state (or path-left-of-start (:path start-point)) (:path end-point)))
       ;; if start and end are on different nodes
       (let [content-zip       (hickory-zip content)
             start-zip         (get-in-zip content-zip (:path start-point))
@@ -609,4 +611,4 @@
                                                                          :offset (get-in state [:focus :offset])})
                                            (update-in [:anchor :offset] + (count text))
                                            (update-in [:focus :offset] + (count text)))))))}
-           (into (editable-hiccup content))]))})))
+           (editable-hiccup content)]))})))
