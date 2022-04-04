@@ -65,21 +65,17 @@
                  (let [[before after] (split-at offset old-text)]
                    (str/join (concat before (seq text) after))))))
 
-(comment
-  (def content (:content @state))
-  (get-in content (at-path [0 0]))
-  (editable-hiccup content)
-  (insert-text content {:path [0 0] :text "...!" :offset 0}))
-
 (defn editable-hiccup [content]
   (walk/prewalk (fn [node]
                   (cond
                     (:tag node)
                     (-> [(:tag node)]
-                        (cond-> (:attrs node) (conj (assoc (:attrs node) :data-rich-node true)))
-                        (cond-> (:content node) (into (if (= (:content node) [""])
-                                                        ["\uFEFF"]
-                                                        (:content node)))))
+                        (conj (-> (:attrs node)
+                                  (assoc :data-rich-node true)))
+                        (cond-> (:content node)
+                          (into (if (= (:content node) [""])
+                                  ["\uFEFF"]
+                                  (:content node)))))
                     :else
                     node))
                 content))
