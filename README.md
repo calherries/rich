@@ -9,7 +9,7 @@
 <br/>
 
 <p align="center">
-  <a href="#"><img src="./docs/images/demo.gif" /></a>
+  <a href="#"><img src="./docs/images/awesome-demo.gif" /></a>
 </p>
 
 ## Warning: 
