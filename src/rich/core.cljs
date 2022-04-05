@@ -7,8 +7,10 @@
             [reagent.core :as r]
             [reagent.dom :as rdom]))
 
-(defn p [x] (def x x) (prn x) x)
-(enable-console-print!)
+(defn p [x]
+  (def x x)
+  (prn x)
+  x)
 
 (def state
   (r/atom {:content {:attrs   {},
@@ -90,9 +92,6 @@
                     :else
                     node))
                 content))
-
-(defn find-rich-node [target]
-  (.closest target "[data-rich-node]"))
 
 (defn rich-node? [target]
   (.hasAttribute target "data-rich-node"))
