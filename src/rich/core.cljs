@@ -87,7 +87,7 @@
                     node))
                 content))
 
-(defn as-hiccup [content] (last "hello\n")
+(defn as-hiccup [content]
   (walk/prewalk (fn [node]
                   (cond
                     ;; COMPAT: Browsers will collapse trailing new lines at the end of blocks,
@@ -95,10 +95,17 @@
                     (and (string? node)
                          (= (last node) "\n"))
                     (str node "\n")
+
+                    ;; If the node is a span with no attributes, replace it with its text content.
+                    (and (= (:tag node) "span")
+                         (empty? (:attrs node)))
+                    (first (:content node))
+
                     (:tag node)
                     (-> [(:tag node)]
                         (cond-> (not-empty (:attrs node)) (conj (:attrs node)))
                         (cond-> (:content node) (into (:content node))))
+
                     :else
                     node))
                 content))
