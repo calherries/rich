@@ -7,10 +7,11 @@
   [:div {:style {:padding "10px"
                  :display "flex"
                  :flex-direction "row"}}
-   [:div {:style {:width       "50%"
-                  :min-height  "100px"
-                  :border      "2px solid black"
-                  :white-space "pre-wrap"}}
+   [:div {:style {:width         "50%"
+                  :min-height    "100px"
+                  :border        "2px solid black"
+                  :white-space   "pre-wrap"
+                  :overflow-wrap "break-word"}}
     [rich/editable]]
    [:div {:style {:width "50%"
                   :min-height "100px"
