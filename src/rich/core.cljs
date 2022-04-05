@@ -70,6 +70,11 @@
 (defn editable-hiccup [content]
   (walk/prewalk (fn [node]
                   (cond
+                    ;; COMPAT: Browsers will collapse trailing new lines at the end of blocks,
+                    ;; so we need to add an extra trailing new lines to prevent that.
+                    (and (string? node)
+                         (= (last node) "\n"))
+                    (str node "\n")
                     (:tag node)
                     (-> [(:tag node)]
                         (conj (-> (:attrs node)
@@ -82,9 +87,14 @@
                     node))
                 content))
 
-(defn as-hiccup [content]
+(defn as-hiccup [content] (last "hello\n")
   (walk/prewalk (fn [node]
                   (cond
+                    ;; COMPAT: Browsers will collapse trailing new lines at the end of blocks,
+                    ;; so we need to add an extra trailing new lines to prevent that.
+                    (and (string? node)
+                         (= (last node) "\n"))
+                    (str node "\n")
                     (:tag node)
                     (-> [(:tag node)]
                         (cond-> (not-empty (:attrs node)) (conj (:attrs node)))
@@ -535,6 +545,7 @@
   ;; => {:style {:font-size "1em", :font-weight "bold"}}
   )
 
+;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
 (defn selection-toggle-attr [state attr-path value]
   (if (selection? state)
    (update-range state (fn [node]
@@ -674,25 +685,27 @@
            {:id                                "rich-editable"
             :content-editable                  true
             :suppress-content-editable-warning true
-            :width        "100%"
-            :height       "100%"
-            :on-key-down  (fn [e]
-                            (when (and (= (.-key e) "b") (.-metaKey e))
-                              (.preventDefault e)
-                              (swap! state selection-toggle-attr [:style :font-weight] "bold"))
-                            (when (and (= (.-key e) "i") (.-metaKey e))
-                              (.preventDefault e)
-                              (swap! state selection-toggle-attr [:style :font-style] "italic")))
-            :on-paste     (fn [e]
-                            (.preventDefault e)
-                            (let [text (-> e .-clipboardData (.getData "Text"))]
-                              (swap! state
-                                     (fn [state]
-                                       (-> state
-                                           (cond-> (selection? state) delete-selection)
-                                           (update :content insert-text {:text   text
-                                                                         :path   (get-in state [:focus :path])
-                                                                         :offset (get-in state [:focus :offset])})
-                                           (update-in [:anchor :offset] + (count text))
-                                           (update-in [:focus :offset] + (count text)))))))}
+            :style                             {:width         "100%"
+                                                :height        "100%"
+                                                :white-space   "pre-wrap"
+                                                :overflow-wrap "break-word"}
+            :on-key-down                       (fn [e]
+                                                 (when (and (= (.-key e) "b") (.-metaKey e))
+                                                   (.preventDefault e)
+                                                   (swap! state selection-toggle-attr [:style :font-weight] "bold"))
+                                                 (when (and (= (.-key e) "i") (.-metaKey e))
+                                                   (.preventDefault e)
+                                                   (swap! state selection-toggle-attr [:style :font-style] "italic")))
+            :on-paste                          (fn [e]
+                                                 (.preventDefault e)
+                                                 (let [text (-> e .-clipboardData (.getData "Text"))]
+                                                   (swap! state
+                                                          (fn [state]
+                                                            (-> state
+                                                                (cond-> (selection? state) delete-selection)
+                                                                (update :content insert-text {:text   text
+                                                                                              :path   (get-in state [:focus :path])
+                                                                                              :offset (get-in state [:focus :offset])})
+                                                                (update-in [:anchor :offset] + (count text))
+                                                                (update-in [:focus :offset] + (count text)))))))}
            (editable-hiccup content)]))})))
