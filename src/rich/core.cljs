@@ -97,7 +97,7 @@
                     (str node "\n")
 
                     ;; If the node is a span with no attributes, replace it with its text content.
-                    (and (= (:tag node) "span")
+                    (and (= (:tag node) :span)
                          (empty? (:attrs node)))
                     (first (:content node))
 
