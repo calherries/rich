@@ -15,7 +15,7 @@
                   :border "2px solid black"
                   :white-space "pre-wrap"
                   :overflow-wrap "break-word"}}
-    (with-out-str (pprint/pprint (update @rich/state :content rich/as-hiccup)))]])
+    (with-out-str (pprint/pprint (update @rich/state :content rich/hickory->hiccup)))]])
 
 
 (defn ^:dev/after-load start []
