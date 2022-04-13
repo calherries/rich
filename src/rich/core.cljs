@@ -729,6 +729,15 @@
                                :path   (get-in state [:focus :path])
                                :offset (get-in state [:focus :offset])}))))
 
+(defn handle-paste [state {:keys [text]}]
+  (-> state
+      (cond-> (selection? state) delete-selection)
+      (update :content hickory-insert-text {:text   text
+                                            :path   (get-in state [:focus :path])
+                                            :offset (get-in state [:focus :offset])})
+      (update-in [:anchor :offset] + (count text))
+      (update-in [:focus :offset] + (count text))))
+
 (def state
   (r/atom initial-state))
 
@@ -791,13 +800,5 @@
             :on-paste                          (fn [e]
                                                  (.preventDefault e)
                                                  (let [text (-> e .-clipboardData (.getData "Text"))]
-                                                   (swap! state
-                                                          (fn [state]
-                                                            (-> state
-                                                                (cond-> (selection? state) delete-selection)
-                                                                (update :content hickory-insert-text {:text   text
-                                                                                                      :path   (get-in state [:focus :path])
-                                                                                                      :offset (get-in state [:focus :offset])})
-                                                                (update-in [:anchor :offset] + (count text))
-                                                                (update-in [:focus :offset] + (count text)))))))}
+                                                   (swap! state handle-paste {:text text})))}
            (editable-hiccup content)]))})))
