@@ -583,14 +583,14 @@
 ;;;;;;;;;;;;;;;;;;;;;
 ;; EDITABLE COMPONENT
 
-(def state
-  (r/atom {:content {:attrs   {},
-                     :content [{:attrs   {}
-                                :content ["Type something awesome"],
-                                :tag     :span,
-                                :type    :element}],
-                     :tag     :div,
-                     :type    :element}}))
+(def initial-state
+  {:content {:attrs   {},
+             :content [{:attrs   {}
+                        :content ["Type something awesome"],
+                        :tag     :span,
+                        :type    :element}],
+             :tag     :div,
+             :type    :element}})
 
 (defn editable-hiccup
   "Converts hickory map to hiccup for the editable component"
@@ -663,6 +663,75 @@
        :focus  {:path   (path-to-node (.-parentElement (.-focusNode selection)))
                 :offset (.-focusOffset selection)}})))
 
+(defn handle-input [state {:keys [input-type input-text]}]
+  (case input-type
+    "insertText"
+    (cond
+      (:remove-attrs state)
+      (let [state (-> state
+                      (update-selection (fn [node]
+                                          (assoc node :attrs {})))
+                      (assoc-in [:anchor :offset] 0)
+                      (assoc-in [:focus :offset] 0))]
+        (-> state
+            (update :content hickory-insert-text {:text   input-text
+                                                  :path   (get-in state [:focus :path])
+                                                  :offset (get-in state [:focus :offset])})
+            (update-in [:anchor :offset] + (count input-text))
+            (update-in [:focus :offset] + (count input-text))
+            (dissoc :remove-attrs)))
+      (:active-attrs state)
+      (let [state (-> state
+                      (update-selection (fn [node]
+                                          (assoc node :attrs (:active-attrs state))))
+                      (assoc-in [:anchor :offset] 0)
+                      (assoc-in [:focus :offset] 0))]
+
+        (-> state
+            (update :content hickory-insert-text {:text   input-text
+                                                  :path   (get-in state [:focus :path])
+                                                  :offset (get-in state [:focus :offset])})
+            (update-in [:anchor :offset] + (count input-text))
+            (update-in [:focus :offset] + (count input-text))
+            (dissoc :active-attrs)))
+      :else
+      (-> state
+          (update :content hickory-insert-text {:text   input-text
+                                                :path   (get-in state [:focus :path])
+                                                :offset (get-in state [:focus :offset])})
+          (update-in [:anchor :offset] + (count input-text))
+          (update-in [:focus :offset] + (count input-text))))
+    "insertParagraph"
+    (-> state
+        (update :content hickory-insert-text {:text   "\n"
+                                              :path   (get-in state [:focus :path])
+                                              :offset (get-in state [:focus :offset])})
+        (update-in [:anchor :offset] inc)
+        (update-in [:focus :offset] inc))
+    "deleteContentBackward"
+    (if (selection? state)
+      (delete-selection state)
+      (delete-backwards state {:unit   "char"
+                               :path   (get-in state [:focus :path])
+                               :offset (get-in state [:focus :offset])}))
+
+    "deleteSoftLineBackward"
+    (if (selection? state)
+      (delete-selection state)
+      (delete-backwards state {:unit   "char"
+                               :path   (get-in state [:focus :path])
+                               :offset (get-in state [:focus :offset])}))
+
+    "deleteWordBackward"
+    (if (selection? state)
+      (delete-selection state)
+      (delete-backwards state {:unit   "char"
+                               :path   (get-in state [:focus :path])
+                               :offset (get-in state [:focus :offset])}))))
+
+(def state
+  (r/atom initial-state))
+
 (defn editable
   []
   (let [on-selection-change (fn []
@@ -672,77 +741,8 @@
                                   (swap! state merge selection))))
         on-before-input     (fn [e]
                               (.preventDefault e)
-                              (let [text (.-data e)
-                                    type (.-inputType e)]
-                                (case type
-                                  "insertText"
-                                  (swap! state (fn [state]
-                                                 (cond
-                                                   (:remove-attrs state)
-                                                   (let [state (-> state
-                                                                   (update-selection (fn [node]
-                                                                                       (assoc node :attrs {})))
-                                                                   (assoc-in [:anchor :offset] 0)
-                                                                   (assoc-in [:focus :offset] 0))]
-                                                     (-> state
-                                                         (update :content hickory-insert-text {:text   text
-                                                                                               :path   (get-in state [:focus :path])
-                                                                                               :offset (get-in state [:focus :offset])})
-                                                         (update-in [:anchor :offset] + (count text))
-                                                         (update-in [:focus :offset] + (count text))
-                                                         (dissoc :remove-attrs)))
-                                                   (:active-attrs state)
-                                                   (let [state (-> state
-                                                                   (update-selection (fn [node]
-                                                                                       (assoc node :attrs (:active-attrs state))))
-                                                                   (assoc-in [:anchor :offset] 0)
-                                                                   (assoc-in [:focus :offset] 0))]
-
-                                                     (-> state
-                                                         (update :content hickory-insert-text {:text   text
-                                                                                               :path   (get-in state [:focus :path])
-                                                                                               :offset (get-in state [:focus :offset])})
-                                                         (update-in [:anchor :offset] + (count text))
-                                                         (update-in [:focus :offset] + (count text))
-                                                         (dissoc :active-attrs)))
-                                                   :else
-                                                   (-> state
-                                                       (update :content hickory-insert-text {:text   text
-                                                                                             :path   (get-in state [:focus :path])
-                                                                                             :offset (get-in state [:focus :offset])})
-                                                       (update-in [:anchor :offset] + (count text))
-                                                       (update-in [:focus :offset] + (count text))))))
-                                  "insertParagraph"
-                                  (swap! state (fn [state]
-                                                 (-> state
-                                                     (update :content hickory-insert-text {:text   "\n"
-                                                                                           :path   (get-in state [:focus :path])
-                                                                                           :offset (get-in state [:focus :offset])})
-                                                     (update-in [:anchor :offset] inc)
-                                                     (update-in [:focus :offset] inc))))
-                                  "deleteContentBackward"
-                                  (swap! state (fn [state]
-                                                 (if (selection? state)
-                                                   (delete-selection state)
-                                                   (delete-backwards state {:unit   "char"
-                                                                            :path   (get-in state [:focus :path])
-                                                                            :offset (get-in state [:focus :offset])}))))
-
-                                  "deleteSoftLineBackward"
-                                  (swap! state (fn [state]
-                                                 (if (selection? state)
-                                                   (delete-selection state)
-                                                   (delete-backwards state {:unit   "char"
-                                                                            :path   (get-in state [:focus :path])
-                                                                            :offset (get-in state [:focus :offset])}))))
-
-                                  "deleteWordBackward"
-                                  (swap! state (fn [state]
-                                                 (if (selection? state)
-                                                   (delete-selection state)
-                                                   (delete-backwards state {:unit   "char"
-                                                                            :path   (get-in state [:focus :path])
-                                                                            :offset (get-in state [:focus :offset])})))))))]
+                              (swap! state handle-input {:input-text (.-data e)
+                                                         :input-type (.-inputType e)}))]
     (r/create-class
      {:component-did-mount
       (fn [this]
