@@ -4,16 +4,17 @@
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.zip :as zip]
+            [hyperfiddle.rcf :refer [tests]]
             [reagent.core :as r]
             [reagent.dom :as rdom]))
-
-;;;;;;;;;;;;;;;;
-;; GENERAL UTILS
 
 (defn p [x]
   (def x x)
   (prn x)
   x)
+
+;;;;;;;;;;;;;;;;
+;; SEQ
 
 (defn take-until
   "Returns a lazy sequence of successive items from coll until
@@ -27,12 +28,17 @@
        (cons (first s) (take-until pred (rest s)))))))
 
 ;;;;;;;;;;;;;;;;;;;;
-;; NESTED DATA UTILS
+;; DEEPLY NESTED DATA
 
 (defn lexicographic-less-than
   "Like <, but also compares (deeply-nested) vectors lexicographically."
   [a b]
   (= (compare a b) -1))
+
+(defn vec-remove
+  "Removes the element in this vector at the given index."
+  [v index]
+  (into (subvec v 0 index) (subvec v (inc index))))
 
 (defn dissoc-in
   "Dissociate a value in a nested associative structure, identified by a sequence
@@ -51,11 +57,6 @@
    (if-let [[ks' & kss] (seq kss)]
      (recur (dissoc-in m ks) ks' kss)
      (dissoc-in m ks))))
-
-(defn vec-remove
-  "Removes the element in this vector at the given index."
-  [v index]
-  (into (subvec v 0 index) (subvec v (inc index))))
 
 (defn dissoc-in-remove
   "Like dissoc-in, but works with vectors too."
@@ -116,14 +117,9 @@
     nil
     (conj (vec (butlast path)) (inc (last path)))))
 
-(comment
-  (update-path-with-delete [0 2]
-                           [0 0])
-  ;; => [0 1]
-
-  (update-path-with-insert-right [0 2]
-                                 [0 1])
-  ;; => [0 3]
+(tests
+  (update-path-with-delete [0 2] [0 0]) := [0 1]
+  (update-path-with-insert-right [0 2] [0 1]) := [0 3]
   )
 
 ;;;;;;;;;;;;;;;;
@@ -198,7 +194,7 @@
                 hickory))
 
 ;;;;;;;;;;;;;;;;;;;;
-;; GENERAL ZIP UTILS
+;; ZIP UTILS
 
 (defn zip-next-seq
   "Given a clojure.zip zipper location loc return a lazy sequence of all
@@ -251,23 +247,23 @@
   [zipper start-path end-path]
   (map path-to-zip (leaf-zips-between zipper start-path end-path)))
 
-(comment
-  (zip/path (zip/vector-zip [1 [2 [0 1] 3] 4]))
-  (nth-child-zip (zip/vector-zip [1 [2 3] 4]) 2)
-  (list (zip-next-seq (zip/vector-zip [1 [2 [0 1] 3] 4])))
-  (get-in [1 [2 [0 1] 3] 4] [1 1 0])
-  (get-in-zip (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0])
-  (leaf-zips-before (get-in-zip (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0]))
-  (leaf-zips-after (get-in-zip (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0]))
-  (path-to-zip (get-in-zip (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0]))
-  (leaf-zips-between (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0] [1 2])
-  (paths-between (zip/vector-zip [1 [2 [0 1] 3] 4]) [1 1 0] [1 2]))
+(tests
+ (def example-zip (zip/vector-zip [1 [2 [0 1] 3] 4]))
+ (path-to-zip example-zip) := []
+ (zip/node (nth-child-zip example-zip 2)) := 4
+ (zip/node (get-in-zip example-zip [1 1 0])) := 0
+ (mapv zip/node (leaf-zips-before (get-in-zip example-zip [1 1 0]))) := [0 2 1]
+ (mapv zip/node (leaf-zips-after (get-in-zip example-zip [1 1 0]))) := [0 1 3 4]
+ (path-to-zip (get-in-zip example-zip [1 1 0])) := [1 1 0]
+ (mapv zip/node (leaf-zips-between example-zip [1 1 0] [1 2])) := [0 1 3]
+ (paths-between example-zip [1 1 0] [1 2]) := '([1 1 0] [1 1 1] [1 2])
+)
 
 ;;;;;;;;;;;;;;;;;;
 ;; EDITABLE STATE
 
 (defn range-from-selection
-  "Return a range (start and end) from a selection (anchor and focus),
+  "Return a range (start and end) from this selection (anchor and focus),
   where the start and end points are ordered lexicographically."
   [{:keys [anchor focus]}]
   (let [[start-point end-point] (if (lexicographic-less-than [(:path anchor) (:offset anchor)]
@@ -277,15 +273,22 @@
     {:start-point start-point
      :end-point   end-point}))
 
-(defn backwards-selection? [{:keys [anchor focus]}]
+(defn backwards-selection?
+  "Returns true if this selection is backwards, meaning that it's anchor is before it's focus."
+  [{:keys [anchor focus]}]
   (lexicographic-less-than [(:path focus) (:offset focus)]
                            [(:path anchor) (:offset anchor)]))
 
-(defn delete-backwards [state {:keys [path offset unit]}]
+(defn delete-backwards
+  "Returns a new state after deleting a unit of characters starting from a given point."
+  [state {:keys [path offset unit]}]
   (if (= offset 0)
+    ;; We are deleting from the start of the leaf, so we need to delete into the previous leaf
     (let [prev-zip (second (leaf-zips-before (get-in-zip (hickory-zip (:content state)) path)))]
       (if (nil? prev-zip)
-        state ; Do nothing, we are at the beginning of the first leaf.
+        ;; Do nothing. We are at the first leaf, and we can't delete further
+        state
+        ;; Delete backwards from the end of the previous leaf.
         (let [prev-path    (path-to-zip prev-zip)
               prev-node    (zip/node prev-zip)
               text-content (first (:content prev-node))]
@@ -305,10 +308,13 @@
                   (let [[before after] (split-at offset old-text)]
                     (str/join (concat (str/join (butlast (seq before))) after))))))))
 
-(defn selection? [{:keys [anchor focus]}]
+(defn selection?
+  "Returns true if there is a selection of text."
+  [{:keys [anchor focus]}]
   (not= anchor focus))
 
 (defn delete-range
+  "Deletes the characters in the current selection."
   [content selection]
   (let [{:keys [start-point
                 end-point]} (range-from-selection selection)

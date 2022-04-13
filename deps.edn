@@ -1,5 +1,6 @@
 {:paths ["src" "dev"]
  :deps  {reagent/reagent            {:mvn/version "1.1.0"}
+         com.hyperfiddle/rcf        {:mvn/version "20220405"}
          meander/epsilon            {:mvn/version "0.0.650"}
          hickory/hickory            {:mvn/version "0.7.1"}
          applied-science/js-interop {:mvn/version "0.3.3"}
