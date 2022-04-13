@@ -1,16 +1,36 @@
 (ns rich.core
   (:require [applied-science.js-interop :as j]
+            [lambdaisland.deep-diff2 :as deep-diff]
             [clojure.data :as data]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.zip :as zip]
             [hyperfiddle.rcf :refer [tests]]
             [reagent.core :as r]
-            [reagent.dom :as rdom]))
+            [reagent.dom :as rdom])
+  (:import [goog.async Throttle Debouncer]))
+
+;;;;;;;;;;;;;;;;
+;; GENERAL UTILS
+
+(defn disposable->function [disposable listener interval]
+  (let [disposable-instance (disposable. listener interval)]
+    (fn [& args]
+      (.apply (.-fire disposable-instance) disposable-instance (to-array args)))))
+
+(defn throttle
+  "Returns a throttled version of a function."
+  [listener interval]
+  (disposable->function Throttle listener interval))
+
+(defn debounce
+  "Returns a debounced version of a function."
+  [listener interval]
+  (disposable->function Debouncer listener interval))
 
 (defn p [x]
   (def x x)
-  (prn x)
+  (js/console.log x)
   x)
 
 ;;;;;;;;;;;;;;;;
@@ -741,25 +761,45 @@
 (def state
   (r/atom initial-state))
 
+(comment
+;;   (do (remove-watch state :state-watcher)
+;;       (add-watch state :state-watcher
+;;                  (fn [_key _atom old-state new-state]
+;;                    (when (not= old-state new-state)
+;;                      (-> (deep-diff/diff old-state new-state)
+;;                          deep-diff/pretty-print
+;;                          with-out-str
+;;                          p)))))
+  )
+
 (defn editable
   []
-  (let [on-selection-change (fn []
-                              (swap! state dissoc :active-attrs :remove-attrs)
-                              (when-let [selection (get-selection)]
-                                (when (not= selection (select-keys @state [:anchor :focus]))
-                                  (swap! state merge selection))))
-        on-before-input     (fn [e]
-                              (.preventDefault e)
-                              (swap! state handle-input {:input-text (.-data e)
-                                                         :input-type (.-inputType e)}))]
+  (let [on-selection-change        (Throttle. (fn []
+                                                (when (or (:active-attrs @state)
+                                                          (:remove-attrs @state))
+                                                  (swap! state dissoc :active-attrs :remove-attrs))
+                                                (when-let [selection (get-selection)]
+                                                  (when (not= selection (select-keys @state [:anchor :focus]))
+                                                    (swap! state merge selection))))
+                                              100)
+        debounced-selection-change (Debouncer. #(.fire on-selection-change) 0)
+        on-before-input            (fn [e]
+                                     (.preventDefault e)
+                                     ;; Some IMEs/Chrome extensions like e.g. Grammarly set the selection immediately before
+                                     ;; triggering a `beforeinput` expecting the change to be applied to the immediately before
+                                     ;; set selection.
+                                     (.stop on-selection-change)
+                                     (.stop debounced-selection-change)
+                                     (swap! state handle-input {:input-text (.-data e)
+                                                                :input-type (.-inputType e)}))]
     (r/create-class
      {:component-did-mount
       (fn [this]
-        (js/window.document.addEventListener "selectionchange" on-selection-change)
+        (js/document.addEventListener "selectionchange" #(.fire debounced-selection-change))
         (.addEventListener (rdom/dom-node this) "beforeinput" on-before-input))
       :component-will-unmount
       (fn [this]
-        (js/document.removeEventListener "selectionchange" on-selection-change)
+        (js/document.removeEventListener "selectionchange" #(.fire debounced-selection-change))
         (.removeEventListener (rdom/dom-node this) "beforeinput" on-before-input))
       :component-did-update
       (fn [this]
@@ -770,8 +810,8 @@
             ;; DOM selection is out of sync, so update it.
             (when (not= (selection-values selection) (selection-values @state))
               (let [{:keys [start-point end-point]} (range-from-selection @state)
-                    dom-range     (js/window.document.createRange)
-                    dom-selection (js/window.getSelection)]
+                    dom-range                       (js/window.document.createRange)
+                    dom-selection                   (js/window.getSelection)]
                 (.setStart dom-range (find-element (conj (:path start-point) 0)) (:offset start-point))
                 (.setEnd dom-range (find-element (conj (:path end-point) 0)) (:offset end-point))
                 (.setBaseAndExtent dom-selection

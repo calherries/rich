@@ -28,6 +28,7 @@
   (rdom/render [app] (js/document.getElementById "app")))
 
 (defn ^:dev/before-load stop []
+;;   (remove-watch rich/state :state-logger)
   (set! hyperfiddle.rcf/*enabled* false))
 
 (defn ^:export init []
