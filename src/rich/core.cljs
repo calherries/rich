@@ -1,20 +1,19 @@
 (ns rich.core
   (:require [applied-science.js-interop :as j]
-            [lambdaisland.deep-diff2 :as deep-diff]
-            ["lodash.debounce" :as debounce]
-            ["lodash.throttle" :as throttle]
+            [clojure.core.match :refer-macros [match]]
             [clojure.data :as data]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.zip :as zip]
+            [lambdaisland.deep-diff2 :as deep-diff]
+            ["lodash.debounce" :as debounce]
+            ["lodash.throttle" :as throttle]
             [hyperfiddle.rcf :refer [tests]]
             [reagent.core :as r]
             [reagent.dom :as rdom]))
 
-
 ;;;;;;;;;;;;;;;;
 ;; GENERAL UTILS
-
 
 (defn p [x]
   (def x x)
@@ -671,9 +670,9 @@
        :focus  {:path   (path-to-node (.-parentElement (.-focusNode selection)))
                 :offset (.-focusOffset selection)}})))
 
-(defn handle-input [state {:keys [input-type input-text]}]
-  (case input-type
-    "insertText"
+(defn handle-intent [state intent-v]
+  (match intent-v
+    [:insert-text input-text]
     (cond
       (:remove-attrs state)
       (let [state (-> state
@@ -709,42 +708,47 @@
                                                 :offset (get-in state [:focus :offset])})
           (update-in [:anchor :offset] + (count input-text))
           (update-in [:focus :offset] + (count input-text))))
-    "insertParagraph"
+
+    [:insert-paragraph]
     (-> state
         (update :content hickory-insert-text {:text   "\n"
                                               :path   (get-in state [:focus :path])
                                               :offset (get-in state [:focus :offset])})
         (update-in [:anchor :offset] inc)
         (update-in [:focus :offset] inc))
-    "deleteContentBackward"
+
+    [:delete-content-backward]
     (if (selection? state)
       (delete-selection state)
       (delete-backwards state {:unit   "char"
                                :path   (get-in state [:focus :path])
                                :offset (get-in state [:focus :offset])}))
 
-    "deleteSoftLineBackward"
+    [:delete-soft-line-backward]
     (if (selection? state)
       (delete-selection state)
       (delete-backwards state {:unit   "char"
                                :path   (get-in state [:focus :path])
                                :offset (get-in state [:focus :offset])}))
 
-    "deleteWordBackward"
+    [:delete-word-backward]
     (if (selection? state)
       (delete-selection state)
       (delete-backwards state {:unit   "char"
                                :path   (get-in state [:focus :path])
-                               :offset (get-in state [:focus :offset])}))))
+                               :offset (get-in state [:focus :offset])}))
 
-(defn handle-paste [state {:keys [text]}]
-  (-> state
-      (cond-> (selection? state) delete-selection)
-      (update :content hickory-insert-text {:text   text
-                                            :path   (get-in state [:focus :path])
-                                            :offset (get-in state [:focus :offset])})
-      (update-in [:anchor :offset] + (count text))
-      (update-in [:focus :offset] + (count text))))
+    [:selection-toggle-attribute path value]
+    (selection-toggle-attr state path value)
+
+    [:handle-paste text]
+    (-> state
+        (cond-> (selection? state) delete-selection)
+        (update :content hickory-insert-text {:text   text
+                                              :path   (get-in state [:focus :path])
+                                              :offset (get-in state [:focus :offset])})
+        (update-in [:anchor :offset] + (count text))
+        (update-in [:focus :offset] + (count text)))))
 
 (def state
   (r/atom initial-state))
@@ -778,8 +782,23 @@
                                      ;; set selection.
                                      (.flush on-selection-change)
                                      (.flush debounced-selection-change)
-                                     (swap! state handle-input {:input-text (.-data e)
-                                                                :input-type (.-inputType e)}))]
+
+                                     (swap!
+                                      state
+                                      (fn [state]
+                                        (let [data       (.-data e)
+                                              input-type (.-inputType e)]
+                                          (case input-type
+                                            "insertText"
+                                            (handle-intent state [:insert-text data])
+                                            "insertParagraph"
+                                            (handle-intent state [:insert-paragraph])
+                                            "deleteContentBackward"
+                                            (handle-intent state [:delete-content-backward])
+                                            "deleteSoftLineBackward"
+                                            (handle-intent state [:delete-soft-line-backward])
+                                            "deleteWordBackward"
+                                            (handle-intent state [:delete-word-backward]))))))]
     (r/create-class
      {:component-did-mount
       (fn [this]
@@ -821,12 +840,12 @@
             :on-key-down                       (fn [e]
                                                  (when (and (= (.-key e) "b") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state selection-toggle-attr [:style :font-weight] "bold"))
+                                                   (swap! state handle-intent [:selection-toggle-attribute [:style :font-weight] "bold"]))
                                                  (when (and (= (.-key e) "i") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state selection-toggle-attr [:style :font-style] "italic")))
+                                                   (swap! state handle-intent [:selection-toggle-attribute [:style :font-style] "italic"])))
             :on-paste                          (fn [e]
                                                  (.preventDefault e)
                                                  (let [text (-> e .-clipboardData (.getData "Text"))]
-                                                   (swap! state handle-paste {:text text})))}
+                                                   (swap! state handle-intent [:paste text])))}
            (editable-hiccup content)]))})))
