@@ -173,30 +173,41 @@
                          (let [[before after] (split-at offset old-text)]
                            (str/join (concat before (seq text) after))))))
 
-(defn hickory->hiccup
-  "Converts a hickory map to hiccup."
+(defn browser-compatible-hickory
+  "Returns Hickory HTML compatible between browsers"
+  [hickory]
+  (walk/prewalk (fn [node]
+                  ;; COMPAT: Browsers will collapse trailing new lines at the end of blocks,
+                  ;; so we need to add an extra trailing new lines to prevent that.
+                  (if (and (string? node)
+                        (= (last node) "\n"))
+                    (str node "\n")
+                    node))
+                hickory))
+
+(defn minimized-hickory
+  "Returns minimized hickory HTML"
   [hickory]
   (walk/prewalk (fn [node]
                   (cond
-                    ;; COMPAT: Browsers will collapse trailing new lines at the end of blocks,
-                    ;; so we need to add an extra trailing new lines to prevent that.
-                    (and (string? node)
-                         (= (last node) "\n"))
-                    (str node "\n")
-
                     ;; If the node is a span with no attributes, replace it with its text content.
                     (and (= (:tag node) :span)
                          (empty? (:attrs node)))
                     (first (:content node))
+                    :else
+                    node))
+                hickory))
 
-                    (:tag node)
+(defn hickory->hiccup
+  "Converts a hickory map to hiccup."
+  [hickory]
+  (walk/prewalk (fn [node]
+                  (if (:tag node)
                     (-> [(:tag node)]
                         (cond-> (not-empty (:attrs node))
                           (conj (:attrs node)))
                         (cond-> (:content node)
                           (into (:content node))))
-
-                    :else
                     node))
                 hickory))
 
@@ -599,24 +610,18 @@
              :tag     :div,
              :type    :element}})
 
-(defn editable-hiccup
-  "Converts hickory map to hiccup for the editable component"
+(defn editable-hickory
+  "Returns hickory HTML for the editable component"
   [content]
   (walk/prewalk (fn [node]
                   (cond
-                    ;; COMPAT: Browsers will collapse trailing new lines at the end of blocks,
-                    ;; so we need to add an extra trailing new lines to prevent that.
-                    (and (string? node)
-                         (= (last node) "\n"))
-                    (str node "\n")
                     (:tag node)
-                    (-> [(:tag node)]
-                        (conj (-> (:attrs node)
-                                  (assoc :data-rich-node true)))
-                        (cond-> (:content node)
-                          (into (if (= (:content node) [""])
-                                  ["\uFEFF"]
-                                  (:content node)))))
+                    (-> node
+                        (assoc-in [:attrs :data-rich-node] true)
+                        (update :content (fn [content]
+                                           (if (= content [""])
+                                             ["\uFEFF"]
+                                             content))))
                     :else
                     node))
                 content))
@@ -848,4 +853,8 @@
                                                  (.preventDefault e)
                                                  (let [text (-> e .-clipboardData (.getData "Text"))]
                                                    (swap! state handle-intent [:paste text])))}
-           (editable-hiccup content)]))})))
+           (-> content
+               editable-hickory
+               minimized-hickory
+               browser-compatible-hickory
+               hickory->hiccup)]))})))

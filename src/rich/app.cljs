@@ -20,7 +20,10 @@
                   :border        "2px solid black"
                   :white-space   "pre-wrap"
                   :overflow-wrap "break-word"}}
-    (with-out-str (pprint/pprint (update @rich/state :content rich/hickory->hiccup)))]])
+    (-> @rich/state
+        (update :content (comp rich/hickory->hiccup rich/browser-compatible-hickory rich/minimized-hickory))
+        pprint/pprint
+        with-out-str)]])
 
 ; Enable tests after app namespaces are loaded (intended for subsequent REPL interactions)
 (set! hyperfiddle.rcf/*enabled* true)
