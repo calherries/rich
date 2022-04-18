@@ -662,7 +662,7 @@
        :focus  {:path   (path-to-node (.-parentElement (.-focusNode selection)))
                 :offset (.-focusOffset selection)}})))
 
-(defmulti handle-intent (fn [_state intent-v]
+(defmulti intent-handler (fn [_state intent-v]
                           (first intent-v)))
 
 ;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
@@ -694,7 +694,7 @@
           (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path]))))
                                          attr-path value))))))
 
-(defmethod handle-intent :selection-toggle-attribute
+(defmethod intent-handler :selection-toggle-attribute
   [state [_ attr-path value]]
   (selection-toggle-attribute state attr-path value))
 
@@ -708,7 +708,7 @@
       (update-in [:anchor :offset] + (count text))
       (update-in [:focus :offset] + (count text))))
 
-(defmethod handle-intent :paste
+(defmethod intent-handler :paste
   [state [_ text]]
   (paste state text))
 
@@ -749,7 +749,7 @@
         (update-in [:anchor :offset] + (count text))
         (update-in [:focus :offset] + (count text)))))
 
-(defmethod handle-intent :insert-text
+(defmethod intent-handler :insert-text
   [state [_ text]]
   (insert-text state text))
 
@@ -761,7 +761,7 @@
       (update-in [:anchor :offset] inc)
       (update-in [:focus :offset] inc)))
 
-(defmethod handle-intent :insert-paragraph
+(defmethod intent-handler :insert-paragraph
   [state [_]]
   (insert-paragraph state))
 
@@ -772,17 +772,24 @@
                              :path   (get-in state [:focus :path])
                              :offset (get-in state [:focus :offset])})))
 
-(defmethod handle-intent :delete-content-backward
+(defmethod intent-handler :delete-content-backward
   [state [_]]
   (delete-content-backward state))
 
-(defmethod handle-intent :delete-soft-line-backward
+(defmethod intent-handler :delete-soft-line-backward
   [state [_]]
   (delete-content-backward state))
 
-(defmethod handle-intent :delete-word-backward
+(defmethod intent-handler :delete-word-backward
   [state [_]]
   (delete-content-backward state))
+
+(defn set-selection [state selection]
+  (merge state selection))
+
+(defmethod intent-handler :set-selection
+  [state [_ selection]]
+  (set-selection state selection))
 
 (def state
   (r/atom initial-state))
@@ -798,16 +805,40 @@
                          p)))))
   )
 
+(def wrapped-intent-handler
+  (fn [state intent-v]
+    (js/console.log intent-v)
+    (-> state
+        (update :history (fnil conj []) intent-v)
+        (intent-handler intent-v))))
+
+(defn redo [state intents]
+  (reduce wrapped-intent-handler
+          state
+          intents))
+
+(comment
+  (let [intents [[:set-selection
+                  {:anchor {:path [0 0], :offset 15},
+                   :focus {:path [0 0], :offset 15}}]
+                 [:selection-toggle-attribute [:style :font-weight] "bold"]
+                 [:insert-text "b"]
+                 [:set-selection
+                  {:anchor {:path [1 0], :offset 1},
+                   :focus {:path [1 0], :offset 1}}]]]
+    (swap! state redo intents))
+  (swap! state redo [[:insert-text "b"]]))
+
 (defn editable
   []
   (let [on-selection-change        (throttle (fn []
-                                                (when (or (:active-attrs @state)
-                                                          (:remove-attrs @state))
-                                                  (swap! state dissoc :active-attrs :remove-attrs))
-                                                (when-let [selection (get-selection)]
-                                                  (when (not= selection (select-keys @state [:anchor :focus]))
-                                                    (swap! state merge selection))))
-                                              100)
+                                               (when (or (:active-attrs @state)
+                                                         (:remove-attrs @state))
+                                                 (swap! state dissoc :active-attrs :remove-attrs))
+                                               (when-let [selection (get-selection)]
+                                                 (when (not= selection (select-keys @state [:anchor :focus]))
+                                                   (swap! state wrapped-intent-handler [:set-selection selection]))))
+                                             100)
         debounced-selection-change (debounce on-selection-change 0)
         on-before-input            (fn [e]
                                      (.preventDefault e)
@@ -824,15 +855,15 @@
                                               input-type (.-inputType e)]
                                           (case input-type
                                             "insertText"
-                                            (handle-intent state [:insert-text data])
+                                            (wrapped-intent-handler state [:insert-text data])
                                             "insertParagraph"
-                                            (handle-intent state [:insert-paragraph])
+                                            (wrapped-intent-handler state [:insert-paragraph])
                                             "deleteContentBackward"
-                                            (handle-intent state [:delete-content-backward])
+                                            (wrapped-intent-handler state [:delete-content-backward])
                                             "deleteSoftLineBackward"
-                                            (handle-intent state [:delete-soft-line-backward])
+                                            (wrapped-intent-handler state [:delete-soft-line-backward])
                                             "deleteWordBackward"
-                                            (handle-intent state [:delete-word-backward]))))))]
+                                            (wrapped-intent-handler state [:delete-word-backward]))))))]
     (r/create-class
      {:component-did-mount
       (fn [this]
@@ -874,14 +905,14 @@
             :on-key-down                       (fn [e]
                                                  (when (and (= (.-key e) "b") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state handle-intent [:selection-toggle-attribute [:style :font-weight] "bold"]))
+                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :font-weight] "bold"]))
                                                  (when (and (= (.-key e) "i") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state handle-intent [:selection-toggle-attribute [:style :font-style] "italic"])))
+                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :font-style] "italic"])))
             :on-paste                          (fn [e]
                                                  (.preventDefault e)
                                                  (let [text (-> e .-clipboardData (.getData "Text"))]
-                                                   (swap! state handle-intent [:paste text])))}
+                                                   (swap! state wrapped-intent-handler [:paste text])))}
            (-> content
                editable-hickory
                minimized-hickory
