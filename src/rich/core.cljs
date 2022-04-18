@@ -43,9 +43,14 @@
   (= (compare a b) -1))
 
 (defn vec-remove
-  "Removes the element in this vector at the given index."
+  "Removes the element in this vector at this index."
   [v index]
   (into (subvec v 0 index) (subvec v (inc index))))
+
+(defn vec-insert
+  "Inserts this element in this vector at this index."
+  [v index el]
+  (vec (concat (subvec v 0 index) [el] (subvec v index))))
 
 (defn dissoc-in
   "Dissociate a value in a nested associative structure, identified by a sequence
@@ -120,9 +125,7 @@
 (defn path-right
   "The path to the right of the given path."
   [path]
-  (if (zero? (last path))
-    nil
-    (conj (vec (butlast path)) (inc (last path)))))
+  (conj (vec (butlast path)) (inc (last path))))
 
 (tests
   (update-path-with-delete [0 2] [0 0]) := [0 1]
@@ -150,10 +153,12 @@
   (vec (interleave (repeat :content) path)))
 
 (defn hickory-update-in
-  "Updates a node at this path with a function f."
+  "Updates a node at this path with a function f.
+   If the path is empty"
   [hickory path f]
-  (when (seq path)
-    (update-in hickory (hickory-path path) f)))
+  (if (seq path)
+    (update-in hickory (hickory-path path) f)
+    (f hickory)))
 
 (defn hickory-dissoc-in
   [hickory path]
@@ -172,6 +177,14 @@
                        (fn [old-text]
                          (let [[before after] (split-at offset old-text)]
                            (str/join (concat before (seq text) after))))))
+
+(defn hickory-insert-node-right
+  "Inserts this node to the right of the node at this path."
+  [hickory {:keys [path node]}]
+  (hickory-update-in hickory
+                     (vec (butlast path))
+                     (fn [parent-node]
+                       (update (p parent-node) :content vec-insert (inc (last path)) node))))
 
 (defn browser-compatible-hickory
   "Returns Hickory HTML compatible between browsers"
@@ -265,7 +278,7 @@
   [zipper start-path end-path]
   (map path-to-zip (leaf-zips-between zipper start-path end-path)))
 
-#_(tests
+(tests
  (def example-zip (zip/vector-zip [1 [2 [0 1] 3] 4]))
  (path-to-zip example-zip) := []
  (zip/node (nth-child-zip example-zip 2)) := 4
@@ -535,7 +548,7 @@
         {:keys [start-point end-point]} (range-from-selection state)]
     (universal-leaf-attrs content (:path start-point) (:path end-point))))
 
-(comment
+(tests
   (let [state {:anchor {:offset 12, :path [0]},
                :content {:attrs {},
                          :content [{:attrs {:style {:font-size "1em"}},
@@ -546,7 +559,7 @@
                          :type :element},
                :focus {:offset 19, :path [0]}}]
     (universal-leaf-attrs-in-selection state))
-  ;; => {:style {:font-size "1em"}}
+  := {:style {:font-size "1em"}}
   (let [state {:anchor {:offset 0, :path [1]},
                :content {:attrs {},
                          :content [{:attrs {:style {:font-size "1em"}},
@@ -566,7 +579,7 @@
                          :type :element},
                :focus {:offset 7, :path [1]}}]
     (universal-leaf-attrs-in-selection state))
-  ;; => {:style {:font-size "1em", :font-weight "bold"}}
+  := {:style {:font-size "1em", :font-weight "bold"}}
   )
 
 ;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
@@ -603,10 +616,13 @@
 
 (def initial-state
   {:content {:attrs   {},
-             :content [{:attrs   {}
-                        :content ["Type something awesome"],
-                        :tag     :span,
-                        :type    :element}],
+             :content [{:tag     :div
+                        :type    :element
+                        :attrs   {}
+                        :content [{:attrs   {}
+                                   :content ["Type something awesome"],
+                                   :tag     :span,
+                                   :type    :element}]}],
              :tag     :div,
              :type    :element}})
 
@@ -746,7 +762,7 @@
     [:selection-toggle-attribute path value]
     (selection-toggle-attr state path value)
 
-    [:handle-paste text]
+    [:paste text]
     (-> state
         (cond-> (selection? state) delete-selection)
         (update :content hickory-insert-text {:text   text

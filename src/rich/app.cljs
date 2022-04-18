@@ -21,7 +21,7 @@
                   :white-space   "pre-wrap"
                   :overflow-wrap "break-word"}}
     (-> @rich/state
-        (update :content (comp rich/hickory->hiccup rich/browser-compatible-hickory rich/minimized-hickory))
+        (update :content (comp rich/hickory->hiccup rich/minimized-hickory))
         pprint/pprint
         with-out-str)]])
 
