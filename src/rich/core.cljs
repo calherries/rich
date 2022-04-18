@@ -684,6 +684,7 @@
           (dissoc :active-attrs)))
     :else
     (-> state
+        (delete-selection)
         (update :content hickory-insert-text {:text   text
                                               :path   (get-in state [:focus :path])
                                               :offset (get-in state [:focus :offset])})
@@ -761,12 +762,9 @@
 (comment
   (let [intents [[:set-selection
                   {:anchor {:path [0 0], :offset 15},
-                   :focus {:path [0 0], :offset 15}}]
+                   :focus {:path [0 0], :offset 22}}]
                  [:selection-toggle-attribute [:style :font-weight] "bold"]
-                 [:insert-text "b"]
-                 [:set-selection
-                  {:anchor {:path [1 0], :offset 1},
-                   :focus {:path [1 0], :offset 1}}]]]
+                 [:insert-text "b"]]]
     (swap! state redo intents))
   (swap! state redo [[:insert-text "b"]])
   (redo @state [[:insert-text "b"]])
@@ -841,10 +839,8 @@
 (defn get-selection
   "Returns the current selection in the editor from the DOM."
   []
-  (let [selection (.getSelection js/window)
-        root      (element-in-editable? (.-parentElement (.-anchorNode selection)))]
-    (when (and (.-anchorNode selection)
-               root)
+  (let [selection (.getSelection js/window)]
+    (when (some-> selection .-anchorNode .-parentElement element-in-editable?)
       {:anchor {:path   (path-to-element (.-parentElement (.-anchorNode selection)) root-element?)
                 :offset (.-anchorOffset selection)}
        :focus  {:path   (path-to-element (.-parentElement (.-focusNode selection)) root-element?)
