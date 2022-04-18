@@ -154,13 +154,19 @@
 
 (defn hickory-update-in
   "Updates a node at this path with a function f.
-   If the path is empty"
+   If the path is empty, we update the root."
   [hickory path f]
   (if (seq path)
     (update-in hickory (hickory-path path) f)
     (f hickory)))
 
+(defn hickory-get-in
+  "Gets a node at this path."
+  [hickory path]
+  (get-in hickory (hickory-path path)))
+
 (defn hickory-dissoc-in
+  "Removes node at this path."
   [hickory path]
   (dissoc-in-remove hickory (hickory-path path)))
 
@@ -597,71 +603,6 @@
              :tag     :div,
              :type    :element}})
 
-(defn editable-hickory
-  "Returns hickory HTML for the editable component"
-  [content]
-  (walk/prewalk (fn [node]
-                  (cond
-                    (:tag node)
-                    (-> node
-                        (assoc-in [:attrs :data-rich-node] true)
-                        (update :content (fn [content]
-                                           (if (= content [""])
-                                             ["\uFEFF"]
-                                             content))))
-                    :else
-                    node))
-                content))
-
-(defn get-root-element []
-  (js/document.getElementById "rich-editable"))
-
-(defn find-element
-  "Finds the element in the DOM at this path."
-  [path]
-  (let [editor     (get-root-element)
-        start-node (-> editor .-childNodes (aget 0))]
-    (loop [node start-node
-           path path]
-      (if (seq path)
-        (recur (aget (.-childNodes node) (first path))
-               (rest path))
-        node))))
-
-(defn editable-node?
-  "Returns true if this element is a node element of the editable component."
-  [element]
-  (.hasAttribute element "data-rich-node"))
-
-(defn root-element
-  "Returns the root element of the editable component"
-  [element]
-  (.closest element "#rich-editable"))
-
-(defn index-from-parent
-  "Returns the index of the element in its parent's children."
-  [element]
-  (let [children (-> element .-parentElement .-children array-seq)]
-    (.indexOf children element)))
-
-(defn path-to-node
-  "Returns the path to the element from the root node, assuming each node is represented by a vector of its children"
-  [element]
-  (if (editable-node? (.-parentElement element))
-    (into [(index-from-parent element)] (path-to-node (.-parentElement element)))
-    []))
-
-(defn get-selection
-  "Returns the current selection in the editor from the DOM."
-  []
-  (let [selection (.getSelection js/window)]
-    (when (and (.-anchorNode selection)
-               (root-element (.-parentElement (.-anchorNode selection))))
-      {:anchor {:path   (path-to-node (.-parentElement (.-anchorNode selection)))
-                :offset (.-anchorOffset selection)}
-       :focus  {:path   (path-to-node (.-parentElement (.-focusNode selection)))
-                :offset (.-focusOffset selection)}})))
-
 (defmulti intent-handler (fn [_state intent-v]
                           (first intent-v)))
 
@@ -827,7 +768,87 @@
                   {:anchor {:path [1 0], :offset 1},
                    :focus {:path [1 0], :offset 1}}]]]
     (swap! state redo intents))
-  (swap! state redo [[:insert-text "b"]]))
+  (swap! state redo [[:insert-text "b"]])
+  (redo @state [[:insert-text "b"]])
+  )
+
+;;;;;;;;
+;; DOM
+
+(defn editable-hickory
+  "Returns hickory HTML for the editable component"
+  [content]
+  (-> (walk/prewalk (fn [node]
+                   (cond
+                     (:tag node)
+                     (-> node
+                         (assoc-in [:attrs :data-rich-node] true)
+                         (update :content (fn [content]
+                                            (if (= content [""])
+                                              ["\uFEFF"]
+                                              content))))
+                     :else
+                     node))
+                 content)
+      (assoc-in [:attrs :data-rich-root] true)))
+
+;; FIXME: needs to take an editor identifier, so there can be more than one editor on the page
+(defn get-root-element []
+  (js/document.getElementById "rich-editable"))
+
+;; FIXME: needs to take an editor identifier, so there can be more than one editor on the page
+(defn find-element
+  "Finds the element in the DOM at this path."
+  [path]
+  (let [editor     (get-root-element)
+        start-node (-> editor .-childNodes (aget 0))]
+    (loop [node start-node
+           path path]
+      (if (seq path)
+        (recur (aget (.-childNodes node) (first path))
+               (rest path))
+        node))))
+
+(defn element-in-editable?
+  "Returns the root element of the editable component"
+  [element]
+  (.closest element "#rich-editable"))
+
+(defn editable-element?
+  "Returns true if this element is a node element of the editable component."
+  [element]
+  (.hasAttribute element "data-rich-node"))
+
+(defn root-element?
+  "Returns true if element is the root of the editable component's content"
+  [element]
+  (.hasAttribute element "data-rich-root"))
+
+(defn index-from-parent
+  "Returns the index of the element in its parent's children."
+  [element]
+  (let [children (-> element .-parentElement .-children array-seq)]
+    (.indexOf children element)))
+
+(defn path-to-element
+  "Returns the path to the first ascendent element for which this predicate returns true.
+   The path assumes each node is represented by a vector of its children."
+  [element pred]
+  (if (pred element)
+    []
+    (conj (path-to-element (.-parentElement element) pred) (index-from-parent element))))
+
+(defn get-selection
+  "Returns the current selection in the editor from the DOM."
+  []
+  (let [selection (.getSelection js/window)
+        root      (element-in-editable? (.-parentElement (.-anchorNode selection)))]
+    (when (and (.-anchorNode selection)
+               root)
+      {:anchor {:path   (path-to-element (.-parentElement (.-anchorNode selection)) root-element?)
+                :offset (.-anchorOffset selection)}
+       :focus  {:path   (path-to-element (.-parentElement (.-focusNode selection)) root-element?)
+                :offset (.-focusOffset selection)}})))
 
 (defn editable
   []
