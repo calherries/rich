@@ -582,35 +582,6 @@
   := {:style {:font-size "1em", :font-weight "bold"}}
   )
 
-;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
-(defn selection-toggle-attr
-  "Toggles an attribute in the selection."
-  [state attr-path value]
-  (if (selection? state)
-    (update-selection state (fn [node]
-                              (if (= (get-in (universal-leaf-attrs-in-selection state) attr-path) value)
-                                (update node :attrs (fn [attrs]
-                                                                                             ;; attrs must be an empty map, not nil
-                                                      (or (dissoc-in attrs attr-path)
-                                                          {})))
-                                (assoc-in node (into [:attrs] attr-path) value))))
-    (if (or (= (get-in (:active-attrs state) attr-path) value)
-            (and (= (-> (get-in (:content state) (hickory-path (get-in state [:anchor :path])))
-                        (get-in (into [:attrs] attr-path)))
-                    value)
-                 (not (:remove-attrs state))))
-      (-> state
-          (assoc :active-attrs (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path])))))
-          (dissoc-in (into [:active-attrs] attr-path))
-          (as-> x (if (and (empty? (get-in x [:active-attrs]))
-                           (not-empty (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path]))))))
-                    (assoc x :remove-attrs true)
-                    x)))
-      (-> state
-          (dissoc :remove-attrs)
-          (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path]))))
-                                         attr-path value))))))
-
 ;;;;;;;;;;;;;;;;;;;;;
 ;; EDITABLE COMPONENT
 
@@ -691,85 +662,127 @@
        :focus  {:path   (path-to-node (.-parentElement (.-focusNode selection)))
                 :offset (.-focusOffset selection)}})))
 
-(defn handle-intent [state intent-v]
-  (match intent-v
-    [:insert-text input-text]
-    (cond
-      (:remove-attrs state)
-      (let [state (-> state
-                      (update-selection (fn [node]
-                                          (assoc node :attrs {})))
-                      (assoc-in [:anchor :offset] 0)
-                      (assoc-in [:focus :offset] 0))]
-        (-> state
-            (update :content hickory-insert-text {:text   input-text
-                                                  :path   (get-in state [:focus :path])
-                                                  :offset (get-in state [:focus :offset])})
-            (update-in [:anchor :offset] + (count input-text))
-            (update-in [:focus :offset] + (count input-text))
-            (dissoc :remove-attrs)))
-      (:active-attrs state)
-      (let [state (-> state
-                      (update-selection (fn [node]
-                                          (assoc node :attrs (:active-attrs state))))
-                      (assoc-in [:anchor :offset] 0)
-                      (assoc-in [:focus :offset] 0))]
+(defmulti handle-intent (fn [_state intent-v]
+                          (first intent-v)))
 
-        (-> state
-            (update :content hickory-insert-text {:text   input-text
-                                                  :path   (get-in state [:focus :path])
-                                                  :offset (get-in state [:focus :offset])})
-            (update-in [:anchor :offset] + (count input-text))
-            (update-in [:focus :offset] + (count input-text))
-            (dissoc :active-attrs)))
-      :else
+;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
+(defn selection-toggle-attribute
+  "Toggles an attribute in the selection."
+  [state attr-path value]
+  (if (selection? state)
+    (update-selection state (fn [node]
+                              (if (= (get-in (universal-leaf-attrs-in-selection state) attr-path) value)
+                                (update node :attrs (fn [attrs]
+                                                                                             ;; attrs must be an empty map, not nil
+                                                      (or (dissoc-in attrs attr-path)
+                                                          {})))
+                                (assoc-in node (into [:attrs] attr-path) value))))
+    (if (or (= (get-in (:active-attrs state) attr-path) value)
+            (and (= (-> (get-in (:content state) (hickory-path (get-in state [:anchor :path])))
+                        (get-in (into [:attrs] attr-path)))
+                    value)
+                 (not (:remove-attrs state))))
       (-> state
-          (update :content hickory-insert-text {:text   input-text
+          (assoc :active-attrs (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path])))))
+          (dissoc-in (into [:active-attrs] attr-path))
+          (as-> x (if (and (empty? (get-in x [:active-attrs]))
+                           (not-empty (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path]))))))
+                    (assoc x :remove-attrs true)
+                    x)))
+      (-> state
+          (dissoc :remove-attrs)
+          (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path]))))
+                                         attr-path value))))))
+
+(defmethod handle-intent :selection-toggle-attribute
+  [state [_ attr-path value]]
+  (selection-toggle-attribute state attr-path value))
+
+(defn paste
+  [state text]
+  (-> state
+      (cond-> (selection? state) delete-selection)
+      (update :content hickory-insert-text {:text   text
+                                            :path   (get-in state [:focus :path])
+                                            :offset (get-in state [:focus :offset])})
+      (update-in [:anchor :offset] + (count text))
+      (update-in [:focus :offset] + (count text))))
+
+(defmethod handle-intent :paste
+  [state [_ text]]
+  (paste state text))
+
+(defn insert-text [state text]
+  (cond
+    (:remove-attrs state)
+    (let [state (-> state
+                    (update-selection (fn [node]
+                                        (assoc node :attrs {})))
+                    (assoc-in [:anchor :offset] 0)
+                    (assoc-in [:focus :offset] 0))]
+      (-> state
+          (update :content hickory-insert-text {:text   text
                                                 :path   (get-in state [:focus :path])
                                                 :offset (get-in state [:focus :offset])})
-          (update-in [:anchor :offset] + (count input-text))
-          (update-in [:focus :offset] + (count input-text))))
+          (update-in [:anchor :offset] + (count text))
+          (update-in [:focus :offset] + (count text))
+          (dissoc :remove-attrs)))
+    (:active-attrs state)
+    (let [state (-> state
+                    (update-selection (fn [node]
+                                        (assoc node :attrs (:active-attrs state))))
+                    (assoc-in [:anchor :offset] 0)
+                    (assoc-in [:focus :offset] 0))]
 
-    [:insert-paragraph]
+      (-> state
+          (update :content hickory-insert-text {:text   text
+                                                :path   (get-in state [:focus :path])
+                                                :offset (get-in state [:focus :offset])})
+          (update-in [:anchor :offset] + (count text))
+          (update-in [:focus :offset] + (count text))
+          (dissoc :active-attrs)))
+    :else
     (-> state
-        (update :content hickory-insert-text {:text   "\n"
-                                              :path   (get-in state [:focus :path])
-                                              :offset (get-in state [:focus :offset])})
-        (update-in [:anchor :offset] inc)
-        (update-in [:focus :offset] inc))
-
-    [:delete-content-backward]
-    (if (selection? state)
-      (delete-selection state)
-      (delete-backwards state {:unit   "char"
-                               :path   (get-in state [:focus :path])
-                               :offset (get-in state [:focus :offset])}))
-
-    [:delete-soft-line-backward]
-    (if (selection? state)
-      (delete-selection state)
-      (delete-backwards state {:unit   "char"
-                               :path   (get-in state [:focus :path])
-                               :offset (get-in state [:focus :offset])}))
-
-    [:delete-word-backward]
-    (if (selection? state)
-      (delete-selection state)
-      (delete-backwards state {:unit   "char"
-                               :path   (get-in state [:focus :path])
-                               :offset (get-in state [:focus :offset])}))
-
-    [:selection-toggle-attribute path value]
-    (selection-toggle-attr state path value)
-
-    [:paste text]
-    (-> state
-        (cond-> (selection? state) delete-selection)
         (update :content hickory-insert-text {:text   text
                                               :path   (get-in state [:focus :path])
                                               :offset (get-in state [:focus :offset])})
         (update-in [:anchor :offset] + (count text))
         (update-in [:focus :offset] + (count text)))))
+
+(defmethod handle-intent :insert-text
+  [state [_ text]]
+  (insert-text state text))
+
+(defn insert-paragraph [state]
+  (-> state
+      (update :content hickory-insert-text {:text   "\n"
+                                            :path   (get-in state [:focus :path])
+                                            :offset (get-in state [:focus :offset])})
+      (update-in [:anchor :offset] inc)
+      (update-in [:focus :offset] inc)))
+
+(defmethod handle-intent :insert-paragraph
+  [state [_]]
+  (insert-paragraph state))
+
+(defn delete-content-backward [state]
+  (if (selection? state)
+    (delete-selection state)
+    (delete-backwards state {:unit   "char"
+                             :path   (get-in state [:focus :path])
+                             :offset (get-in state [:focus :offset])})))
+
+(defmethod handle-intent :delete-content-backward
+  [state [_]]
+  (delete-content-backward state))
+
+(defmethod handle-intent :delete-soft-line-backward
+  [state [_]]
+  (delete-content-backward state))
+
+(defmethod handle-intent :delete-word-backward
+  [state [_]]
+  (delete-content-backward state))
 
 (def state
   (r/atom initial-state))
