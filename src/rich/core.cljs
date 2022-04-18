@@ -129,26 +129,34 @@
 
 (tests
   (update-path-with-delete [0 2] [0 0]) := [0 1]
-  (update-path-with-insert-right [0 2] [0 1]) := [0 3]
-  )
+  (update-path-with-insert-right [0 2] [0 1]) := [0 3])
+
 
 ;;;;;;;;;;;;;;;;
 ;; HICKORY
+
+(defn text-node? [node]
+  (and (= (count (:content node)) 1)
+       (string? (first (:content node)))
+       (= (:tag node) :span)))
+
+(defn text-node->text [text-node]
+  (first (:content text-node)))
 
 (defn hickory-zip
   "Returns a zipper for hickory maps given a root element."
   [root]
   (zip/zipper (fn [node]
-                (and (not (string? node))
-                     (not (string? (first (:content node))))))
+                (not (text-node? node)))
               (comp seq :content)
               (fn [node children]
                 (assoc node :content (and children (apply vector children))))
               root))
 
 (defn hickory-path
-  "Returns the path to a node in a hickory map, given a path that
-   assumes nodes are replaced by their content."
+  "Returns the path to a node in a hickory map,
+   imagining the node tree as a vector of vectors,
+   where each node is a vector of its children."
   [path]
   (vec (interleave (repeat :content) path)))
 
@@ -159,6 +167,14 @@
   (if (seq path)
     (update-in hickory (hickory-path path) f)
     (f hickory)))
+
+(defn hickory-assoc-in
+  "Assoc's a node at this path with this value.
+   If the path is empty, we replace the root."
+  [hickory path v]
+  (if (seq path)
+    (assoc-in hickory (hickory-path path) v)
+    v))
 
 (defn hickory-get-in
   "Gets a node at this path."
@@ -190,7 +206,7 @@
   (hickory-update-in hickory
                      (vec (butlast path))
                      (fn [parent-node]
-                       (update (p parent-node) :content vec-insert (inc (last path)) node))))
+                       (update parent-node :content vec-insert (inc (last path)) node))))
 
 (defn browser-compatible-hickory
   "Returns Hickory HTML compatible between browsers"
@@ -231,6 +247,150 @@
                 hickory))
 
 ;;;;;;;;;;;;;;;;;;;;
+;; MARKED TEXT
+
+(defn marked-text
+  "Returns marked text from this string, where every charater has these attrs.
+   Marked text is represented by a vector of marked characters, where a marked character
+   is a 2-vec of the character and the attrs the character has."
+  [text attrs]
+  (map vector (seq text) (repeat attrs)))
+
+(defn text-node->marked-text
+  "Returns marked text from this hickory text node."
+  [text-node]
+  (let [characters (seq (text-node->text text-node))]
+    (marked-text characters (:attrs text-node))))
+
+(defn text-nodes->marked-text
+  "Returns marked text from these hickory text nodes."
+  [text-nodes]
+  (vec (mapcat text-node->marked-text text-nodes)))
+
+(defn marked-text->text-nodes
+  "Returns a vector of text-nodes from this marked text"
+  [marked-text]
+  (->> marked-text
+       (partition-by second)
+       (map (fn [part]
+              {:attrs   (second (first part))
+               :content [(apply str (map first part))]
+               :tag     :span
+               :type    :element}))
+       vec))
+
+;; FIXME: should rename to character index
+(defn node-index-and-offset->text-offset [text-nodes {:keys [node-index node-offset]}]
+  (let [cumulative-offsets   (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
+        start-offset-of-node (nth cumulative-offsets node-index)
+        side-of-character    (if (= (count (text-node->text (nth text-nodes node-index)))
+                                    node-offset)
+                               :right
+                               :left)]
+    {:character-index   (+ start-offset-of-node
+                           (cond-> node-offset
+                             (= side-of-character :right)
+                             dec))
+     :side-of-character side-of-character}))
+
+(defn text-offset->node-index-and-offset
+  [text-nodes {:keys [character-index side-of-character]}]
+  (let [start-offsets          (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
+        [start-offset-of-node
+         [node-index _node]]   (->> text-nodes
+                                    (map-indexed vector)
+                                    (map vector start-offsets)
+                                    (take-while (fn [[start-offset _indexed-node]]
+                                                  (<= start-offset character-index)))
+                                    (last))]
+    {:node-index  node-index
+     :node-offset (cond-> (- character-index
+                             start-offset-of-node)
+                    (= side-of-character :right)
+                    inc)}))
+
+(tests
+ (def text-nodes [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+                  {:attrs {:style {:font-weight "bold"}},
+                   :content ["something"],
+                   :tag :span,
+                   :type :element}
+                  {:attrs {}, :content ["awesome"], :tag :span, :type :element}])
+
+ (node-index-and-offset->text-offset text-nodes {:node-index 0 :node-offset 5})
+ := {:side-of-character :right, :character-index 4}
+
+ (text-offset->node-index-and-offset text-nodes {:character-index 4 :side-of-character :right})
+ := {:node-index 0, :node-offset 5}
+
+ (node-index-and-offset->text-offset text-nodes {:node-index 1 :node-offset 0})
+ := {:side-of-character :left, :character-index 5}
+
+ (text-offset->node-index-and-offset text-nodes {:character-index 5 :side-of-character :left})
+ := {:node-index 1, :node-offset 0}
+)
+
+
+(tests
+ (let [text-nodes [{:attrs {:style {:font-weight "bold"}}, :content ["bold"], :tag :span, :type :element}
+                   {:attrs {}, :content [" and "], :tag :span, :type :element}
+                   {:attrs {:style {:font-style "italic"}}, :content ["italic"], :tag :span, :type :element}]]
+   (text-nodes->marked-text text-nodes))
+ := [["b" {:style {:font-weight "bold"}}]
+     ["o" {:style {:font-weight "bold"}}]
+     ["l" {:style {:font-weight "bold"}}]
+     ["d" {:style {:font-weight "bold"}}]
+     [" " {}]
+     ["a" {}]
+     ["n" {}]
+     ["d" {}]
+     [" " {}]
+     ["i" {:style {:font-style "italic"}}]
+     ["t" {:style {:font-style "italic"}}]
+     ["a" {:style {:font-style "italic"}}]
+     ["l" {:style {:font-style "italic"}}]
+     ["i" {:style {:font-style "italic"}}]
+     ["c" {:style {:font-style "italic"}}]]
+
+ (let [marked-text [["b" {:style {:font-weight "bold"}}]
+                    ["o" {:style {:font-weight "bold"}}]
+                    ["l" {:style {:font-weight "bold"}}]
+                    ["d" {:style {:font-weight "bold"}}]
+                    [" " {}]
+                    ["a" {}]
+                    ["n" {}]
+                    ["d" {}]
+                    [" " {}]
+                    ["i" {:style {:font-style "italic"}}]
+                    ["t" {:style {:font-style "italic"}}]
+                    ["a" {:style {:font-style "italic"}}]
+                    ["l" {:style {:font-style "italic"}}]
+                    ["i" {:style {:font-style "italic"}}]
+                    ["c" {:style {:font-style "italic"}}]]]
+   (marked-text->text-nodes marked-text))
+ := [{:attrs {:style {:font-weight "bold"}}
+      :content ["bold"]
+      :tag :span,
+      :type :element}
+     {:attrs {}
+      :content [" and "]
+      :tag :span
+      :type :element}
+     {:attrs {:style {:font-style "italic"}}
+      :content ["italic"]
+      :tag :span
+      :type :element}])
+
+
+
+(defn update-marked-text-attrs
+  "Updates the attrs of each character with this function."
+  [marked-text f]
+  (mapv (fn [[char attrs]]
+          [char (f attrs)])
+        marked-text))
+
+;;;;;;;;;;;;;;;;;;;;
 ;; ZIP UTILS
 
 (defn zip-next-seq
@@ -241,12 +401,12 @@
     ()
     (lazy-seq (cons loc (zip-next-seq (zip/next loc))))))
 
-(defn nth-child-zip [zipper n]
+(defn zip-nth-child [zipper n]
   (nth (iterate zip/right (zip/down zipper)) n))
 
-(defn get-in-zip [zipper path]
+(defn zip-get-in [zipper path]
   (if (seq path)
-    (get-in-zip (nth-child-zip zipper (first path)) (rest path))
+    (zip-get-in (zip-nth-child zipper (first path)) (rest path))
     zipper))
 
 (defn leaf-zips-after
@@ -277,7 +437,7 @@
 (defn leaf-zips-between
   "Returns all leaf zippers between start-path and end-path, inclusive."
   [zipper start-path end-path]
-  (take-until (fn [z] (= (path-to-zip z) end-path)) (leaf-zips-after (get-in-zip zipper start-path))))
+  (take-until (fn [z] (= (path-to-zip z) end-path)) (leaf-zips-after (zip-get-in zipper start-path))))
 
 (defn paths-between
   "All paths between start-path and end-path"
@@ -287,14 +447,14 @@
 (tests
  (def example-zip (zip/vector-zip [1 [2 [0 1] 3] 4]))
  (path-to-zip example-zip) := []
- (zip/node (nth-child-zip example-zip 2)) := 4
- (zip/node (get-in-zip example-zip [1 1 0])) := 0
- (mapv zip/node (leaf-zips-before (get-in-zip example-zip [1 1 0]))) := [0 2 1]
- (mapv zip/node (leaf-zips-after (get-in-zip example-zip [1 1 0]))) := [0 1 3 4]
- (path-to-zip (get-in-zip example-zip [1 1 0])) := [1 1 0]
+ (zip/node (zip-nth-child example-zip 2)) := 4
+ (zip/node (zip-get-in example-zip [1 1 0])) := 0
+ (mapv zip/node (leaf-zips-before (zip-get-in example-zip [1 1 0]))) := [0 2 1]
+ (mapv zip/node (leaf-zips-after (zip-get-in example-zip [1 1 0]))) := [0 1 3 4]
+ (path-to-zip (zip-get-in example-zip [1 1 0])) := [1 1 0]
  (mapv zip/node (leaf-zips-between example-zip [1 1 0] [1 2])) := [0 1 3]
- (paths-between example-zip [1 1 0] [1 2]) := '([1 1 0] [1 1 1] [1 2])
-)
+ (paths-between example-zip [1 1 0] [1 2]) := '([1 1 0] [1 1 1] [1 2]))
+
 
 ;;;;;;;;;;;;;;;;;;
 ;; EDITABLE STATE
@@ -321,7 +481,7 @@
   [state {:keys [path offset unit]}]
   (if (= offset 0)
     ;; We are deleting from the start of the leaf, so we need to delete into the previous leaf
-    (let [prev-zip (second (leaf-zips-before (get-in-zip (hickory-zip (:content state)) path)))]
+    (let [prev-zip (second (leaf-zips-before (zip-get-in (hickory-zip (:content state)) path)))]
       (if (nil? prev-zip)
         ;; Do nothing. We are at the first leaf, and we can't delete further
         state
@@ -396,7 +556,7 @@
   "Merges adjacent nodes between given start and end paths (inclusive), when adjacent nodes are mergeable."
   [{:keys [content anchor focus] :as state} start-path end-path]
   (let [content-zip                (hickory-zip content)
-        start-node-zip             (get-in-zip content-zip start-path)
+        start-node-zip             (zip-get-in content-zip start-path)
         {:keys [zip anchor focus]} (loop [{:keys [zip anchor focus end-path]} {:zip      start-node-zip
                                                                                :anchor   anchor
                                                                                :focus    focus
@@ -446,94 +606,179 @@
            :anchor anchor
            :focus focus)))
 
-(defn update-selection
-  "Updates all the nodes in the current selected range with a function."
+(defn update-subvec
+  "Updates the subvector with this function.
+   Flattens the results back into the original vector"
+  [v start end f]
+  (-> (subvec v 0 start)
+      (into (f (subvec v start end)))
+      (into (subvec v end))))
+
+(tests
+  (update-subvec [0 1 2 3] 1 2 (fn [xs] (map inc xs)))
+  (update-subvec [0 1 2 3] 1 2 (fn [xs] (map inc xs)))
+  := [0 2 2 3])
+
+(defn update-selection-attrs
+  "Updates all the text in the current selected range with this function."
   [state update-fn]
-  (let [content                         (:content state)
-        {:keys [start-point end-point]} (range-from-selection state)]
-    (if (= (:path start-point) (:path end-point))
-      (let [content-zip        (hickory-zip content)
-            original-zip       (get-in-zip content-zip (:path start-point))
-            original-node      (zip/node original-zip)
-            original-text      (first (:content original-node))
-            before-text        (subs original-text 0 (:offset start-point))
-            split-text         (subs original-text (:offset start-point) (:offset end-point))
-            split-node         (update-fn (assoc original-node :content [split-text]))
-            after-text         (subs original-text (:offset end-point))
-            split-zip          (if (not-empty before-text)
-                                 (-> original-zip
-                                     (zip/replace (assoc original-node :content [before-text]))
-                                     (zip/insert-right split-node)
-                                     (zip/right))
-                                 (-> original-zip
-                                     (zip/replace split-node)))
-            content            (-> split-zip
-                                   (cond-> (not-empty after-text)
-                                     (zip/insert-right (assoc original-node :content [after-text])))
-                                   (zip/root))
-            start-point        {:path   (path-to-zip split-zip)
-                                :offset 0}
-            end-point          {:path   (path-to-zip split-zip)
-                                :offset (count split-text)}
-            [anchor focus]     (if (backwards-selection? state)
-                                 [end-point start-point]
-                                 [start-point end-point])
-            state              (-> state
-                                   (merge {:content content
-                                           :anchor  anchor
-                                           :focus   focus}))
-            path-left-of-start (path-left (:path start-point))]
-        (merge-between state (or path-left-of-start (:path start-point)) (:path end-point)))
-      ;; If start and end are on different nodes
-      (let [content-zip       (hickory-zip content)
-            start-zip          (get-in-zip content-zip (:path start-point))
-            start-node         (zip/node start-zip)
-            start-text         (first (:content start-node))
-            start-before-text  (subs start-text 0 (:offset start-point))
-            start-split-text   (subs start-text (:offset start-point))
-            start-split-node   (update-fn (assoc start-node :content [start-split-text]))
-            [start-split-zip
-             end-point]        (if (not-empty start-before-text)
-                                 [(-> start-zip
-                                      (zip/replace (assoc start-node :content [start-before-text]))
-                                      (zip/insert-right start-split-node)
-                                      (zip/right))
-                                  (update end-point :path update-path-with-insert-right (path-to-zip start-zip))]
-                                 [(-> start-zip
-                                      (zip/replace start-split-node))
-                                  end-point])
-            end-split-zip      (loop [zip start-split-zip]
-                                 (if (= (path-to-zip zip) (:path end-point))
-                                   zip
-                                   (let [next-zip (next-leaf zip)]
-                                     (recur (cond-> next-zip
-                                              (not (= (path-to-zip next-zip) (:path end-point)))
-                                              (zip/edit update-fn))))))
-            end-split-node     (zip/node end-split-zip)
-            end-text           (first (:content end-split-node))
-            end-split-text     (subs end-text 0 (:offset end-point))
-            end-after-text     (subs end-text (:offset end-point))
-            end-split-zip      (-> end-split-zip
-                                   (zip/edit update-fn)
-                                   (zip/edit assoc :content [end-split-text]))
-            end-split-zip      (if (not-empty end-after-text)
-                                 (zip/insert-right end-split-zip (assoc end-split-node :content [end-after-text]))
-                                 end-split-zip)
-            content            (zip/root end-split-zip)
-            start-point        {:path   (path-to-zip start-split-zip)
-                                :offset 0}
-            end-point          {:path   (:path end-point)
-                                :offset (count end-split-text)}
-            [anchor focus]     (if (backwards-selection? state)
-                                 [end-point start-point]
-                                 [start-point end-point])
-            path-left-of-start (path-left (:path start-point))
-            start-path         (or path-left-of-start (:path start-point))]
-        (-> state
-            (merge {:content content
-                    :anchor  anchor
-                    :focus   focus})
-            (merge-between start-path (:path end-point)))))))
+  (let [content           (:content state)
+        {:keys [start-point end-point]} (range-from-selection state)
+        parent-path       (vec (butlast (:path start-point)))
+        parent-node       (hickory-get-in content parent-path)
+        sibling-nodes     (:content parent-node)
+        start-index       (last (:path start-point))
+        end-index         (last (:path end-point))
+        start-text-offset (node-index-and-offset->text-offset sibling-nodes {:node-index  start-index
+                                                                             :node-offset (:offset start-point)})
+        end-text-offset   (node-index-and-offset->text-offset sibling-nodes {:node-index  end-index
+                                                                             :node-offset (:offset end-point)})
+        new-sibling-nodes (-> sibling-nodes
+                              (text-nodes->marked-text)
+                              (update-subvec (cond-> (:character-index start-text-offset)
+                                               (= (:side-of-character start-text-offset) :right)
+                                               inc)
+                                             (cond-> (:character-index end-text-offset)
+                                               (= (:side-of-character end-text-offset) :right)
+                                               inc)
+                                             (fn [marked-text]
+                                               (update-marked-text-attrs marked-text update-fn)))
+                              (marked-text->text-nodes))
+        {new-start-index  :node-index
+         new-start-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes start-text-offset)
+        {new-end-index    :node-index
+         new-end-offset   :node-offset} (text-offset->node-index-and-offset new-sibling-nodes end-text-offset)
+        new-start-point   {:path   (conj parent-path new-start-index)
+                           :offset new-start-offset}
+        new-end-point     {:path   (conj parent-path new-end-index)
+                           :offset new-end-offset}
+        [anchor focus]    (if (backwards-selection? state)
+                            [new-end-point new-start-point]
+                            [new-start-point new-end-point])
+        new-content       (hickory-update-in content parent-path
+                                             (fn [parent-node]
+                                               (assoc parent-node :content new-sibling-nodes)))]
+    (merge state {:content new-content
+                  :anchor  anchor
+                  :focus   focus})))
+
+(tests
+ (let [state {:anchor  {:offset 5, :path [0 0]},
+              :focus   {:offset 7, :path [0 2]},
+              :content {:attrs {},
+                        :content
+                        [{:attrs {},
+                          :content
+                          [{:attrs {}, :content ["Type something "], :tag :span, :type :element}
+                           {:attrs {:style {:font-weight "bold"}},
+                            :content ["bold "],
+                            :tag :span,
+                            :type :element}
+                           {:attrs {}, :content ["awesome"], :tag :span, :type :element}],
+                          :tag :div,
+                          :type :element}],
+                        :tag :div,
+                        :type :element}}
+       update-fn (fn [x] (assoc-in x [:style :font-weight] "bold"))]
+   (update-selection-attrs state update-fn))
+ := {:anchor {:offset 0, :path [0 1]},
+     :content
+     {:attrs {},
+      :content
+      [{:attrs {},
+        :content [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+                  {:attrs {:style {:font-weight "bold"}},
+                   :content ["something bold awesome"],
+                   :tag :span,
+                   :type :element}],
+        :tag :div,
+        :type :element}],
+      :tag :div,
+      :type :element},
+     :focus {:offset 22, :path [0 1]}})
+
+(defn insert-marked-text
+  "Inserts this marked text at the current cursor."
+  [state marked-text]
+  (if (seq marked-text)
+    (let [content           (:content state)
+          {:keys [start-point _end-point]} (range-from-selection state) ;; Asume start-point and end-point are equal
+          parent-path       (vec (butlast (:path start-point)))
+          parent-node       (hickory-get-in content parent-path)
+          sibling-nodes     (:content parent-node)
+          start-index       (last (:path start-point))
+          start-text-offset (node-index-and-offset->text-offset sibling-nodes {:node-index  start-index
+                                                                               :node-offset (:offset start-point)})
+          new-sibling-nodes (-> sibling-nodes
+                                (text-nodes->marked-text)
+                                (update-subvec (cond-> (:character-index start-text-offset)
+                                                 (= (:side-of-character start-text-offset) :right)
+                                                 inc)
+                                               (cond-> (:character-index start-text-offset)
+                                                 (= (:side-of-character start-text-offset) :right)
+                                                 inc)
+                                               (fn [_]
+                                                 marked-text))
+                                (marked-text->text-nodes))
+          new-character-index (cond-> (+ (count marked-text)
+                                         (:character-index start-text-offset))
+                                ;; If the cursor was originally to the left of the current character, switch to the right of the last character
+                                (= (:side-of-character start-text-offset) :left)
+                                dec)
+          {new-start-index  :node-index
+           new-start-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes {:character-index   new-character-index
+                                                                                                 :side-of-character :right})
+          new-start-point   {:path   (conj parent-path new-start-index)
+                             :offset new-start-offset}
+          new-content       (hickory-update-in content parent-path
+                                               (fn [parent-node]
+                                                 (assoc parent-node :content new-sibling-nodes)))]
+      (merge state {:content new-content
+                    :anchor  new-start-point
+                    :focus   new-start-point}))
+    ;; if there's no marked-text
+    state))
+
+;; FIXME: is this needed? for pasting?
+(defn replace-with-marked-text
+  "Replaces the current selected range with this marked text."
+  [state marked-text]
+  (let [content           (:content state)
+        {:keys [start-point end-point]} (range-from-selection state)
+        parent-path       (vec (butlast (:path start-point)))
+        parent-node       (hickory-get-in content parent-path)
+        sibling-nodes     (:content parent-node)
+        start-index       (last (:path start-point))
+        end-index         (last (:path end-point))
+        {start-offset :character-index
+         start-side-of-character :side-of-character} (node-index-and-offset->text-offset sibling-nodes {:node-index  start-index
+                                                                                                        :node-offset (:offset start-point)})
+        end-offset        (node-index-and-offset->text-offset sibling-nodes {:node-index  end-index
+                                                                             :node-offset (:offset end-point)})
+        new-sibling-nodes (-> sibling-nodes
+                              (text-nodes->marked-text)
+                              (update-subvec start-offset end-offset
+                                             (fn [_]
+                                               marked-text))
+                              (marked-text->text-nodes))
+        end-offset        (+ start-offset (count marked-text))
+        {new-start-index  :node-index
+         new-start-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes start-offset)
+        {new-end-index  :node-index
+         new-end-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes end-offset)
+        new-start-point   {:path   (conj parent-path new-start-index)
+                           :offset new-start-offset}
+        new-end-point     {:path   (conj parent-path new-end-index)
+                           :offset new-end-offset}
+        [anchor focus]    (if (backwards-selection? state)
+                            [new-end-point new-start-point]
+                            [new-start-point new-end-point])
+        new-content       (hickory-update-in content parent-path
+                                             (fn [parent-node]
+                                               (assoc parent-node :content new-sibling-nodes)))]
+    (merge state {:content new-content
+                  :anchor  anchor
+                  :focus   focus})))
 
 (defn things-in-both
   "Recursively diffs a and b to find the common values. Maps are subdiffed where keys match and values differ."
@@ -541,7 +786,7 @@
   (nth (data/diff a b) 2))
 
 (defn universal-leaf-attrs
-  "Returns the common attributes of all nodes between two paths."
+  "Returns the common attributes of all nodes between two paths, inclusive."
   [content start-path end-path]
   (let [leaf-nodes (->> (leaf-zips-between (hickory-zip content) start-path end-path)
                         (map (comp :attrs zip/node)))]
@@ -551,8 +796,11 @@
   "Returns the common attributes of all nodes in the selection."
   [state]
   (let [content                         (:content state)
-        {:keys [start-point end-point]} (range-from-selection state)]
-    (universal-leaf-attrs content (:path start-point) (:path end-point))))
+        {:keys [start-point end-point]} (range-from-selection state)
+        end-path                        (if (zero? (:offset end-point))
+                                          (path-left (:path end-point))
+                                          (:path end-point))]
+    (universal-leaf-attrs content (:path start-point) end-path)))
 
 (tests
   (let [state {:anchor {:offset 12, :path [0]},
@@ -585,8 +833,8 @@
                          :type :element},
                :focus {:offset 7, :path [1]}}]
     (universal-leaf-attrs-in-selection state))
-  := {:style {:font-size "1em", :font-weight "bold"}}
-  )
+  := {:style {:font-size "1em", :font-weight "bold"}})
+
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; EDITABLE COMPONENT
@@ -611,13 +859,9 @@
   "Toggles an attribute in the selection."
   [state attr-path value]
   (if (selection? state)
-    (update-selection state (fn [node]
-                              (if (= (get-in (universal-leaf-attrs-in-selection state) attr-path) value)
-                                (update node :attrs (fn [attrs]
-                                                                                             ;; attrs must be an empty map, not nil
-                                                      (or (dissoc-in attrs attr-path)
-                                                          {})))
-                                (assoc-in node (into [:attrs] attr-path) value))))
+    (update-selection-attrs state (if (= (get-in (universal-leaf-attrs-in-selection state) attr-path) value)
+                                    (fn [attrs] (dissoc-in attrs attr-path))
+                                    (fn [attrs] (assoc-in attrs attr-path value))))
     (if (or (= (get-in (:active-attrs state) attr-path) value)
             (and (= (-> (get-in (:content state) (hickory-path (get-in state [:anchor :path])))
                         (get-in (into [:attrs] attr-path)))
@@ -653,35 +897,40 @@
   [state [_ text]]
   (paste state text))
 
+(comment
+  (let [state {:active-attrs {:style {:font-weight "bold"}},
+               :anchor {:offset 15, :path [0 0]},
+               :content
+               {:attrs {},
+                :content
+                [{:attrs {},
+                  :content [{:attrs {},
+                             :content ["Type something awesome"],
+                             :tag :span,
+                             :type :element}],
+                  :tag :div,
+                  :type :element}],
+                :tag :div,
+                :type :element},
+               :focus {:offset 15, :path [0 0]},
+               :history [[:set-selection
+                          {:anchor {:offset 15, :path [0 0]},
+                           :focus {:offset 15, :path [0 0]}}]
+                         [:selection-toggle-attribute [:style :font-weight] "bold"]]}]
+    (-> state
+        (replace-with-marked-text (marked-text "bold" {:style {:font-weight "bold"}})))))
+
+
 (defn insert-text [state text]
   (cond
     (:remove-attrs state)
-    (let [state (-> state
-                    (update-selection (fn [node]
-                                        (assoc node :attrs {})))
-                    (assoc-in [:anchor :offset] 0)
-                    (assoc-in [:focus :offset] 0))]
-      (-> state
-          (update :content hickory-insert-text {:text   text
-                                                :path   (get-in state [:focus :path])
-                                                :offset (get-in state [:focus :offset])})
-          (update-in [:anchor :offset] + (count text))
-          (update-in [:focus :offset] + (count text))
-          (dissoc :remove-attrs)))
+    (-> state
+        (insert-marked-text (marked-text text {}))
+        (dissoc :remove-attrs))
     (:active-attrs state)
-    (let [state (-> state
-                    (update-selection (fn [node]
-                                        (assoc node :attrs (:active-attrs state))))
-                    (assoc-in [:anchor :offset] 0)
-                    (assoc-in [:focus :offset] 0))]
-
-      (-> state
-          (update :content hickory-insert-text {:text   text
-                                                :path   (get-in state [:focus :path])
-                                                :offset (get-in state [:focus :offset])})
-          (update-in [:anchor :offset] + (count text))
-          (update-in [:focus :offset] + (count text))
-          (dissoc :active-attrs)))
+    (-> state
+        (insert-marked-text (marked-text text (:active-attrs state)))
+        (dissoc :active-attrs))
     :else
     (-> state
         (delete-selection)
@@ -744,8 +993,8 @@
                      (-> (deep-diff/diff old-state new-state)
                          deep-diff/pretty-print
                          with-out-str
-                         p)))))
-  )
+                         p))))))
+
 
 (def wrapped-intent-handler
   (fn [state intent-v]
@@ -777,16 +1026,16 @@
   "Returns hickory HTML for the editable component"
   [content]
   (-> (walk/prewalk (fn [node]
-                   (cond
-                     (:tag node)
-                     (-> node
-                         (assoc-in [:attrs :data-rich-node] true)
-                         (update :content (fn [content]
-                                            (if (= content [""])
-                                              ["\uFEFF"]
-                                              content))))
-                     :else
-                     node))
+                     (cond
+                       (:tag node)
+                       (-> node
+                           (assoc-in [:attrs :data-rich-node] true)
+                           (update :content (fn [content]
+                                              (if (= content [""])
+                                                ["\uFEFF"]
+                                                content))))
+                       :else
+                       node))
                  content)
       (assoc-in [:attrs :data-rich-root] true)))
 
