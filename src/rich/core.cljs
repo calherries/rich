@@ -739,47 +739,6 @@
     ;; if there's no marked-text
     state))
 
-;; FIXME: is this needed? for pasting?
-(defn replace-with-marked-text
-  "Replaces the current selected range with this marked text."
-  [state marked-text]
-  (let [content           (:content state)
-        {:keys [start-point end-point]} (range-from-selection state)
-        parent-path       (vec (butlast (:path start-point)))
-        parent-node       (hickory-get-in content parent-path)
-        sibling-nodes     (:content parent-node)
-        start-index       (last (:path start-point))
-        end-index         (last (:path end-point))
-        {start-offset :character-index
-         start-side-of-character :side-of-character} (node-index-and-offset->text-offset sibling-nodes {:node-index  start-index
-                                                                                                        :node-offset (:offset start-point)})
-        end-offset        (node-index-and-offset->text-offset sibling-nodes {:node-index  end-index
-                                                                             :node-offset (:offset end-point)})
-        new-sibling-nodes (-> sibling-nodes
-                              (text-nodes->marked-text)
-                              (update-subvec start-offset end-offset
-                                             (fn [_]
-                                               marked-text))
-                              (marked-text->text-nodes))
-        end-offset        (+ start-offset (count marked-text))
-        {new-start-index  :node-index
-         new-start-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes start-offset)
-        {new-end-index  :node-index
-         new-end-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes end-offset)
-        new-start-point   {:path   (conj parent-path new-start-index)
-                           :offset new-start-offset}
-        new-end-point     {:path   (conj parent-path new-end-index)
-                           :offset new-end-offset}
-        [anchor focus]    (if (backwards-selection? state)
-                            [new-end-point new-start-point]
-                            [new-start-point new-end-point])
-        new-content       (hickory-update-in content parent-path
-                                             (fn [parent-node]
-                                               (assoc parent-node :content new-sibling-nodes)))]
-    (merge state {:content new-content
-                  :anchor  anchor
-                  :focus   focus})))
-
 (defn things-in-both
   "Recursively diffs a and b to find the common values. Maps are subdiffed where keys match and values differ."
   [a b]
@@ -897,30 +856,6 @@
   [state [_ text]]
   (paste state text))
 
-(comment
-  (let [state {:active-attrs {:style {:font-weight "bold"}},
-               :anchor {:offset 15, :path [0 0]},
-               :content
-               {:attrs {},
-                :content
-                [{:attrs {},
-                  :content [{:attrs {},
-                             :content ["Type something awesome"],
-                             :tag :span,
-                             :type :element}],
-                  :tag :div,
-                  :type :element}],
-                :tag :div,
-                :type :element},
-               :focus {:offset 15, :path [0 0]},
-               :history [[:set-selection
-                          {:anchor {:offset 15, :path [0 0]},
-                           :focus {:offset 15, :path [0 0]}}]
-                         [:selection-toggle-attribute [:style :font-weight] "bold"]]}]
-    (-> state
-        (replace-with-marked-text (marked-text "bold" {:style {:font-weight "bold"}})))))
-
-
 (defn insert-text [state text]
   (cond
     (:remove-attrs state)
@@ -932,13 +867,13 @@
         (insert-marked-text (marked-text text (:active-attrs state)))
         (dissoc :active-attrs))
     :else
-    (-> state
-        (delete-selection)
-        (update :content hickory-insert-text {:text   text
-                                              :path   (get-in state [:focus :path])
-                                              :offset (get-in state [:focus :offset])})
-        (update-in [:anchor :offset] + (count text))
-        (update-in [:focus :offset] + (count text)))))
+    (let [state (delete-selection state)]
+      (-> state
+          (update :content hickory-insert-text {:text   text
+                                                :path   (get-in state [:focus :path])
+                                                :offset (get-in state [:focus :offset])})
+          (update-in [:anchor :offset] + (count text))
+          (update-in [:focus :offset] + (count text))))))
 
 (defmethod intent-handler :insert-text
   [state [_ text]]
