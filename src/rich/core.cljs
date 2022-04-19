@@ -844,22 +844,30 @@
     (update-selection-attrs state (if (= (get-in (universal-leaf-attrs-in-selection state) attr-path) value)
                                     (fn [attrs] (dissoc-in attrs attr-path))
                                     (fn [attrs] (assoc-in attrs attr-path value))))
-    (if (or (= (get-in (:active-attrs state) attr-path) value)
-            (and (= (-> (get-in (:content state) (hickory-path (get-in state [:anchor :path])))
-                        (get-in (into [:attrs] attr-path)))
-                    value)
-                 (not (:remove-attrs state))))
-      (-> state
-          (assoc :active-attrs (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path])))))
-          (dissoc-in (into [:active-attrs] attr-path))
-          (as-> x (if (and (empty? (get-in x [:active-attrs]))
-                           (not-empty (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path]))))))
-                    (assoc x :remove-attrs true)
-                    x)))
-      (-> state
-          (dissoc :remove-attrs)
-          (assoc :active-attrs (assoc-in (:attrs (get-in (:content state) (hickory-path (get-in state [:anchor :path]))))
-                                         attr-path value))))))
+    (let [content            (:content state)
+          attrs-under-cursor (:attrs (hickory-get-in content (get-in state [:anchor :path])))]
+      (if (or
+           ;; The attribute is already in active-attrs
+           (= (get-in (:active-attrs state) attr-path)
+              value)
+           ;; The attribute is already applied to the text under the cursor, and we are not removing attrs
+           (and (= (-> (hickory-get-in content (get-in state [:anchor :path]))
+                       (get-in (into [:attrs] attr-path)))
+                   value)
+                (not (:remove-attrs state))))
+        ;; Toggle off
+        (let [new-active-attrs (dissoc-in attrs-under-cursor attr-path)]
+          (if (empty? new-active-attrs)
+            (-> state
+                (dissoc :active-attrs)
+                (cond-> (not-empty attrs-under-cursor)
+                  (assoc :remove-attrs true)))
+            (-> state
+                (assoc :active-attrs new-active-attrs))))
+        ;; Toggle on
+        (-> state
+            (dissoc :remove-attrs)
+            (assoc :active-attrs (assoc-in attrs-under-cursor attr-path value)))))))
 
 (defmethod intent-handler :selection-toggle-attribute
   [state [_ attr-path value]]
