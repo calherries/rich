@@ -339,31 +339,33 @@
 ;; The following two functions map a point in a vector of text nodes
 ;; to an index in an array of characters, and vice versa.
 ;;
-;; node-index-and-offset   <=> text-index
-;; [[a b c|][d e f]]       <=> ([a b c | d e f], [:node-side-of-cursor :left])
-;; [0 3]                   <=> {:text-index 3, :node-side-of-cursor :left}
+;; node-index-and-offset <=> text-index + node-side-of-index
+;;     [[a b c|][d e f]] <=> ([a b c | d e f], [:node-side-of-index :left])
+;;                 [0 3] <=> {:text-index 3, :node-side-of-index :left}
+;;
+;; :node-side-of-index is needed to recover the original node-index-and-offset from a text-index.
 
 (defn node-index-and-offset->text-index [text-nodes {:keys [node-index node-offset]}]
   (let [cumulative-offsets   (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
         start-offset-of-node (nth cumulative-offsets node-index)
-        node-side-of-cursor  (if (= (count (text-node->text (nth text-nodes node-index)))
+        node-side-of-index   (if (= (count (text-node->text (nth text-nodes node-index)))
                                     node-offset)
                                :left ; left is the exception. It's only to the left if the node-offset is equal to the count of characters in the node, i.e. the cursor is at the end of the node.
                                :right)]
-    {:text-index          (+ start-offset-of-node
-                             node-offset)
+    {:text-index         (+ start-offset-of-node
+                            node-offset)
      ;; Node side of cursor is :left if converting back to a point, the point should be in the node to the left of the cursor.
-     :node-side-of-cursor node-side-of-cursor}))
+     :node-side-of-index node-side-of-index}))
 
 (defn text-index->node-index-and-offset
-  [text-nodes {:keys [text-index node-side-of-cursor]}]
+  [text-nodes {:keys [text-index node-side-of-index]}]
   (let [start-offsets          (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
         [start-offset-of-node
          [node-index _node]]   (->> text-nodes
                                     (map-indexed vector)
                                     (map vector start-offsets)
                                     (take-while (fn [[start-offset _indexed-node]]
-                                                  (if (= node-side-of-cursor :left)
+                                                  (if (= node-side-of-index :left)
                                                     (< start-offset text-index)
                                                     (<= start-offset text-index))))
                                     (last))]
@@ -716,8 +718,8 @@
           new-character-index (+ (count marked-text)
                                  (:text-index start-text-offset))
           {new-start-index  :node-index
-           new-start-offset :node-offset} (text-index->node-index-and-offset new-sibling-nodes {:text-index          new-character-index
-                                                                                                   :node-side-of-cursor :left})
+           new-start-offset :node-offset} (text-index->node-index-and-offset new-sibling-nodes {:text-index         new-character-index
+                                                                                                :node-side-of-index :left})
           new-start-point   {:path   (conj parent-path new-start-index)
                              :offset new-start-offset}
           new-content       (hickory-update-in content parent-path
