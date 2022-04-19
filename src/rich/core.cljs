@@ -85,6 +85,27 @@
     :else
     data))
 
+(defn deep-merge
+  "Recursively merges maps together. If all the maps supplied have nested maps
+  under the same keys, these nested maps are merged. Otherwise the value is
+  overwritten, as in `clojure.core/merge`."
+  ([])
+  ([a] a)
+  ([a b]
+   (when (or a b)
+     (letfn [(merge-entry [m e]
+               (let [k  (key e)
+                     v' (val e)]
+                 (if (contains? m k)
+                   (assoc m k (let [v (get m k)]
+                                (if (and (map? v) (map? v'))
+                                  (deep-merge v v')
+                                  v')))
+                   (assoc m k v'))))]
+       (reduce merge-entry (or a {}) (seq b)))))
+  ([a b & more]
+   (reduce deep-merge (or a {}) (cons b more))))
+
 (defn select-paths
   "Like select-keys, but with paths instead of keys"
   [m paths]
@@ -538,78 +559,6 @@
       (assoc state :anchor (:focus state))
       (assoc state :focus (:anchor state)))))
 
-(defn mergeable?
-  "Returns true if two nodes are equivalent except for their content."
-  [node-a node-b]
-  (= (dissoc node-a :content)
-     (dissoc node-b :content)))
-
-(defn merge-right
-  "Merges the current node with the node to the right."
-  [zip]
-  (let [next-zip  (zip/right zip)
-        zip-text  (get-in (zip/node zip) [:content 0])
-        next-text (get-in (zip/node next-zip) [:content 0])]
-    (-> zip
-        (zip/edit (fn [node]
-                    (assoc-in node [:content 0] (str zip-text next-text))))
-        (next-leaf)
-        (zip/remove))))
-
-(defn merge-between
-  "Merges adjacent nodes between given start and end paths (inclusive), when adjacent nodes are mergeable."
-  [{:keys [content anchor focus] :as state} start-path end-path]
-  (let [content-zip                (hickory-zip content)
-        start-node-zip             (zip-get-in content-zip start-path)
-        {:keys [zip anchor focus]} (loop [{:keys [zip anchor focus end-path]} {:zip      start-node-zip
-                                                                               :anchor   anchor
-                                                                               :focus    focus
-                                                                               :end-path end-path}]
-                                     (if (lexicographic-less-than end-path (path-to-zip zip))
-                                       {:zip    zip
-                                        :anchor anchor
-                                        :focus  focus}
-                                       (if (nil? (zip/right zip))
-                                         (if-let [next-zip (next-leaf zip)]
-                                           (recur {:zip      next-zip
-                                                   :anchor   anchor
-                                                   :focus    focus
-                                                   :end-path end-path})
-                                           {:zip    zip
-                                            :anchor anchor
-                                            :focus  focus})
-                                         (let [next-zip (zip/right zip)]
-                                           (recur (if (mergeable? (zip/node zip)
-                                                                  (zip/node next-zip))
-                                                    (let [path-to-delete (path-to-zip zip)
-                                                          text-length    (count (get-in (zip/node zip) [:content 0]))
-                                                          zip            (merge-right zip)
-                                                          zip            (if (zip/left zip)
-                                                                           (zip/left zip)
-                                                                           zip)
-                                                          end-path       (if (= end-path path-to-delete)
-                                                                           (path-right end-path)
-                                                                           end-path)
-                                                          end-path       (update-path-with-delete end-path path-to-delete)]
-                                                      {:zip      zip
-                                                       :anchor   (-> anchor
-                                                                     (cond-> (= (:path anchor) (path-to-zip next-zip))
-                                                                       (update :offset #(+ % text-length)))
-                                                                     (update :path update-path-with-delete path-to-delete))
-                                                       :focus    (-> focus
-                                                                     (cond-> (= (:path focus) (path-to-zip next-zip))
-                                                                       (update :offset #(+ % text-length)))
-                                                                     (update :path update-path-with-delete path-to-delete))
-                                                       :end-path end-path})
-                                                    {:zip      next-zip
-                                                     :anchor   anchor
-                                                     :focus    focus
-                                                     :end-path end-path}))))))]
-    (assoc state
-           :content (zip/root zip)
-           :anchor anchor
-           :focus focus)))
-
 (defn update-subvec
   "Updates the subvector with this function.
    Flattens the results back into the original vector"
@@ -869,7 +818,42 @@
         ;; Toggle on
         (-> state
             (dissoc :remove-attrs)
-            (assoc :active-attrs (assoc-in attrs-under-cursor attr-path value)))))))
+            (update :active-attrs deep-merge (assoc-in attrs-under-cursor attr-path value)))))))
+
+(tests
+ "Set two active attributes under the cursor and start typing"
+ (let [intents [[:set-selection
+                 {:anchor {:path [0 0], :offset 15},
+                  :focus {:path [0 0], :offset 15}}]
+                [:selection-toggle-attribute [:style :font-weight] "bold"]
+                [:selection-toggle-attribute [:style :font-style] "italic"]
+                [:insert-text "b"]]
+       state (redo initial-state intents)]
+   state)
+ := {:anchor {:offset 1, :path [0 1]},
+     :content
+     {:attrs {},
+      :content
+      [{:attrs {},
+        :content
+        [{:attrs {}, :content ["Type something "], :tag :span, :type :element}
+         {:attrs {:style {:font-style "italic", :font-weight "bold"}},
+          :content ["b"],
+          :tag :span,
+          :type :element}
+         {:attrs {}, :content ["awesome"], :tag :span, :type :element}],
+        :tag :div,
+        :type :element}],
+      :tag :div,
+      :type :element},
+     :focus {:offset 1, :path [0 1]},
+     :history [[:set-selection
+                {:anchor {:offset 15, :path [0 0]},
+                 :focus {:offset 15, :path [0 0]}}]
+               [:selection-toggle-attribute [:style :font-weight] "bold"]
+               [:selection-toggle-attribute [:style :font-style] "italic"]
+               [:insert-text "b"]]}
+  )
 
 (defmethod intent-handler :selection-toggle-attribute
   [state [_ attr-path value]]
