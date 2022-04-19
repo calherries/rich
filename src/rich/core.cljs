@@ -152,7 +152,6 @@
   (update-path-with-delete [0 2] [0 0]) := [0 1]
   (update-path-with-insert-right [0 2] [0 1]) := [0 3])
 
-
 ;;;;;;;;;;;;;;;;
 ;; HICKORY
 
@@ -163,6 +162,22 @@
 
 (defn text-node->text [text-node]
   (first (:content text-node)))
+
+(defn split-text-node-at
+  "Splits this text-node at this character offset."
+  [text-node offset]
+  (let [[before-text after-text] (map #(apply str %) (split-at offset (text-node->text text-node)))]
+    [(assoc text-node :content [before-text])
+     (assoc text-node :content [after-text])]))
+
+(defn split-text-nodes-at
+  "Splits this list of text-nodes into two arrays of text nodes at this point"
+  [text-nodes {:keys [offset node-index]}]
+  (p [text-nodes {:keys [offset node-index]}])
+  (let [[before [at-index & after]]      (split-at node-index text-nodes)
+        [at-index-before at-index-after] (split-text-node-at at-index offset)]
+    [(conj (vec before) at-index-before)
+     (vec (cons at-index-after after))]))
 
 (defn hickory-zip
   "Returns a zipper for hickory maps given a root element."
@@ -567,10 +582,17 @@
       (into (f (subvec v start end)))
       (into (subvec v end))))
 
+(defn replace-subvec
+  "Replaces this subvector with another subvector."
+  [v start end xs]
+  (update-subvec v start end (fn [] xs)))
+
 (tests
-  (update-subvec [0 1 2 3] 1 2 (fn [xs] (map inc xs)))
-  (update-subvec [0 1 2 3] 1 2 (fn [xs] (map inc xs)))
-  := [0 2 2 3])
+  (update-subvec [0 1 2 3] 1 3 (fn [xs] (map #(* 100 %) xs)))
+  := [0 100 200 3]
+  (replace-subvec [0 1 2 3] 1 3 [100])
+  := [0 100 3]
+ )
 
 (defn update-selection-attrs
   "Updates all the text in the current selected range with this function."
@@ -896,13 +918,119 @@
   [state [_ text]]
   (insert-text state text))
 
-(defn insert-paragraph [state]
+(tests
+  (let [text-nodes [{:attrs {}, :content ["Type something "], :tag :span, :type :element}
+                    {:attrs {:style {:font-style "italic", :font-weight "bold"}},
+                     :content ["bold and "],
+                     :tag :span,
+                     :type :element}
+                    {:attrs {}, :content ["awesome"], :tag :span, :type :element}]]
+    (split-text-nodes-at text-nodes {:offset 20 :node-index 0}))
+    := [[{:attrs {}, :content ["Type something "], :tag :span, :type :element}]
+        [{:attrs {}, :content [""], :tag :span, :type :element}
+         {:attrs {:style {:font-style "italic", :font-weight "bold"}},
+          :content ["bold and "],
+          :tag :span,
+          :type :element}
+         {:attrs {}, :content ["awesome"], :tag :span, :type :element}]]
+  )
+
+(defn insert-paragraph-at-selection-start
+  "Inserts a paragraph at the start of the selection.
+   Assumes the selection is collapsed."
+  [state]
+  (let [content            (:content state)
+        {:keys [start-point _end-point]} (range-from-selection state)
+        parent-path        (vec (butlast (:path start-point)))
+        parent-node        (hickory-get-in content parent-path)
+        parent-parent-path (vec (butlast parent-path))
+        parent-index       (last parent-path)
+        parent-parent      (hickory-get-in content parent-parent-path)
+        parent-siblings    (:content parent-parent)
+        sibling-nodes      (:content parent-node)
+        start-index        (last (:path start-point))
+        ;; Split the text nodes in the parent
+        [first-nodes second-nodes] (split-text-nodes-at sibling-nodes {:offset     (:offset start-point)
+                                                                       :node-index start-index})
+        ;; clone the parent
+        first-parent-node   (assoc parent-node :content first-nodes)
+        second-parent-node  (assoc parent-node :content second-nodes)
+        ;; replace parent with two new nodes
+        new-parent-siblings (replace-subvec parent-siblings parent-index (inc parent-index) [first-parent-node second-parent-node])
+        new-content         (hickory-update-in content parent-parent-path
+                                               (fn [parent-parent]
+                                                 (assoc parent-parent :content new-parent-siblings)))
+        ;; selection is collapsed at the beginning of the second parent
+        new-point {:path   (conj (path-right parent-path) 0)
+                   :offset 0}]
+    ;; replace the parent node with two new parents
+    (-> state
+        (assoc :content new-content)
+        (assoc :anchor new-point)
+        (assoc :focus new-point))))
+
+(tests
+  (let [state {:anchor {:offset 4, :path [0 1]},
+               :content
+               {:attrs {},
+                :content
+                [{:attrs {},
+                  :content
+                  [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+                   {:attrs {:style {:font-weight "bold"}},
+                    :content ["something"],
+                    :tag :span,
+                    :type :element}
+                   {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
+                  :tag :div,
+                  :type :element}],
+                :tag :div,
+                :type :element},
+               :focus {:offset 4, :path [0 1]},
+               :history
+               [[:set-selection
+                 {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
+                [:selection-toggle-attribute [:style :font-weight] "bold"]
+                [:set-selection
+                 {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]}]
+    (insert-paragraph-at-selection-start state))
+    := {:anchor {:offset 0, :path [1 0]},
+        :content
+        {:attrs {},
+         :content
+         [{:attrs {},
+           :content [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+                     {:attrs {:style {:font-weight "bold"}},
+                      :content ["some"],
+                      :tag :span,
+                      :type :element}],
+           :tag :div,
+           :type :element}
+          {:attrs {},
+           :content
+           [{:attrs {:style {:font-weight "bold"}},
+             :content ["thing"],
+             :tag :span,
+             :type :element}
+            {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
+           :tag :div,
+           :type :element}],
+         :tag :div,
+         :type :element},
+        :focus {:offset 0, :path [1 0]},
+        :history
+        [[:set-selection
+          {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
+         [:selection-toggle-attribute [:style :font-weight] "bold"]
+         [:set-selection
+          {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]}
+  )
+
+(defn insert-paragraph
+  [state]
   (-> state
-      (update :content hickory-insert-text {:text   "\n"
-                                            :path   (get-in state [:focus :path])
-                                            :offset (get-in state [:focus :offset])})
-      (update-in [:anchor :offset] inc)
-      (update-in [:focus :offset] inc)))
+      (delete-selection)
+      (insert-paragraph-at-selection-start)))
 
 (defmethod intent-handler :insert-paragraph
   [state [_]]
