@@ -279,58 +279,6 @@
                :type    :element}))
        vec))
 
-;; FIXME: should rename to character index
-(defn node-index-and-offset->text-offset [text-nodes {:keys [node-index node-offset]}]
-  (let [cumulative-offsets   (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
-        start-offset-of-node (nth cumulative-offsets node-index)
-        side-of-character    (if (= (count (text-node->text (nth text-nodes node-index)))
-                                    node-offset)
-                               :right
-                               :left)]
-    {:character-index   (+ start-offset-of-node
-                           (cond-> node-offset
-                             (= side-of-character :right)
-                             dec))
-     :side-of-character side-of-character}))
-
-(defn text-offset->node-index-and-offset
-  [text-nodes {:keys [character-index side-of-character]}]
-  (let [start-offsets          (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
-        [start-offset-of-node
-         [node-index _node]]   (->> text-nodes
-                                    (map-indexed vector)
-                                    (map vector start-offsets)
-                                    (take-while (fn [[start-offset _indexed-node]]
-                                                  (<= start-offset character-index)))
-                                    (last))]
-    {:node-index  node-index
-     :node-offset (cond-> (- character-index
-                             start-offset-of-node)
-                    (= side-of-character :right)
-                    inc)}))
-
-(tests
- (def text-nodes [{:attrs {}, :content ["Type "], :tag :span, :type :element}
-                  {:attrs {:style {:font-weight "bold"}},
-                   :content ["something"],
-                   :tag :span,
-                   :type :element}
-                  {:attrs {}, :content ["awesome"], :tag :span, :type :element}])
-
- (node-index-and-offset->text-offset text-nodes {:node-index 0 :node-offset 5})
- := {:side-of-character :right, :character-index 4}
-
- (text-offset->node-index-and-offset text-nodes {:character-index 4 :side-of-character :right})
- := {:node-index 0, :node-offset 5}
-
- (node-index-and-offset->text-offset text-nodes {:node-index 1 :node-offset 0})
- := {:side-of-character :left, :character-index 5}
-
- (text-offset->node-index-and-offset text-nodes {:character-index 5 :side-of-character :left})
- := {:node-index 1, :node-offset 0}
-)
-
-
 (tests
  (let [text-nodes [{:attrs {:style {:font-weight "bold"}}, :content ["bold"], :tag :span, :type :element}
                    {:attrs {}, :content [" and "], :tag :span, :type :element}
@@ -381,14 +329,68 @@
       :tag :span
       :type :element}])
 
-
-
 (defn update-marked-text-attrs
   "Updates the attrs of each character with this function."
   [marked-text f]
   (mapv (fn [[char attrs]]
           [char (f attrs)])
         marked-text))
+
+;; The following two functions map a point in a vector of text nodes
+;; to an index in an array of characters, and vice versa.
+;;
+;; node-index-and-offset   <=> text-index
+;; [[a b c|][d e f]]       <=> ([a b c | d e f], [:node-side-of-cursor :left])
+;; [0 3]                   <=> {:text-index 3, :node-side-of-cursor :left}
+
+(defn node-index-and-offset->text-index [text-nodes {:keys [node-index node-offset]}]
+  (let [cumulative-offsets   (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
+        start-offset-of-node (nth cumulative-offsets node-index)
+        node-side-of-cursor  (if (= (count (text-node->text (nth text-nodes node-index)))
+                                    node-offset)
+                               :left ; left is the exception. It's only to the left if the node-offset is equal to the count of characters in the node, i.e. the cursor is at the end of the node.
+                               :right)]
+    {:text-index          (+ start-offset-of-node
+                             node-offset)
+     ;; Node side of cursor is :left if converting back to a point, the point should be in the node to the left of the cursor.
+     :node-side-of-cursor node-side-of-cursor}))
+
+(defn text-index->node-index-and-offset
+  [text-nodes {:keys [text-index node-side-of-cursor]}]
+  (let [start-offsets          (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
+        [start-offset-of-node
+         [node-index _node]]   (->> text-nodes
+                                    (map-indexed vector)
+                                    (map vector start-offsets)
+                                    (take-while (fn [[start-offset _indexed-node]]
+                                                  (if (= node-side-of-cursor :left)
+                                                    (< start-offset text-index)
+                                                    (<= start-offset text-index))))
+                                    (last))]
+    {:node-index  node-index
+     :node-offset (- text-index
+                     start-offset-of-node)}))
+
+(tests
+ (def text-nodes [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+                  {:attrs {:style {:font-weight "bold"}},
+                   :content ["something"],
+                   :tag :span,
+                   :type :element}
+                  {:attrs {}, :content ["awesome"], :tag :span, :type :element}])
+
+ (node-index-and-offset->text-index text-nodes {:node-index 0 :node-offset 5})
+ := {:side-of-character :right, :character-index 4}
+
+ (text-index->node-index-and-offset text-nodes {:character-index 4 :side-of-character :right})
+ := {:node-index 0, :node-offset 5}
+
+ (node-index-and-offset->text-index text-nodes {:node-index 1 :node-offset 0})
+ := {:side-of-character :left, :character-index 5}
+
+ (text-index->node-index-and-offset text-nodes {:character-index 5 :side-of-character :left})
+ := {:node-index 1, :node-offset 0}
+)
 
 ;;;;;;;;;;;;;;;;;;;;
 ;; ZIP UTILS
@@ -629,25 +631,21 @@
         sibling-nodes     (:content parent-node)
         start-index       (last (:path start-point))
         end-index         (last (:path end-point))
-        start-text-offset (node-index-and-offset->text-offset sibling-nodes {:node-index  start-index
+        start-text-offset (node-index-and-offset->text-index sibling-nodes {:node-index  start-index
                                                                              :node-offset (:offset start-point)})
-        end-text-offset   (node-index-and-offset->text-offset sibling-nodes {:node-index  end-index
+        end-text-offset   (node-index-and-offset->text-index sibling-nodes {:node-index  end-index
                                                                              :node-offset (:offset end-point)})
         new-sibling-nodes (-> sibling-nodes
                               (text-nodes->marked-text)
-                              (update-subvec (cond-> (:character-index start-text-offset)
-                                               (= (:side-of-character start-text-offset) :right)
-                                               inc)
-                                             (cond-> (:character-index end-text-offset)
-                                               (= (:side-of-character end-text-offset) :right)
-                                               inc)
+                              (update-subvec (:text-index start-text-offset)
+                                             (:text-index end-text-offset)
                                              (fn [marked-text]
                                                (update-marked-text-attrs marked-text update-fn)))
                               (marked-text->text-nodes))
         {new-start-index  :node-index
-         new-start-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes start-text-offset)
+         new-start-offset :node-offset} (text-index->node-index-and-offset new-sibling-nodes start-text-offset)
         {new-end-index    :node-index
-         new-end-offset   :node-offset} (text-offset->node-index-and-offset new-sibling-nodes end-text-offset)
+         new-end-offset   :node-offset} (text-index->node-index-and-offset new-sibling-nodes end-text-offset)
         new-start-point   {:path   (conj parent-path new-start-index)
                            :offset new-start-offset}
         new-end-point     {:path   (conj parent-path new-end-index)
@@ -663,39 +661,38 @@
                   :focus   focus})))
 
 (tests
- (let [state {:anchor  {:offset 5, :path [0 0]},
-              :focus   {:offset 7, :path [0 2]},
-              :content {:attrs {},
-                        :content
-                        [{:attrs {},
-                          :content
-                          [{:attrs {}, :content ["Type something "], :tag :span, :type :element}
-                           {:attrs {:style {:font-weight "bold"}},
-                            :content ["bold "],
-                            :tag :span,
-                            :type :element}
-                           {:attrs {}, :content ["awesome"], :tag :span, :type :element}],
-                          :tag :div,
-                          :type :element}],
-                        :tag :div,
-                        :type :element}}
-       update-fn (fn [x] (assoc-in x [:style :font-weight] "bold"))]
-   (update-selection-attrs state update-fn))
+ "Select a word and make it bold"
+ (let [intents [[:set-selection
+                 {:anchor {:path [0 0], :offset 8}, :focus {:path [0 0], :offset 8}}]
+                [:set-selection
+                 {:anchor {:path [0 0], :offset 5},
+                  :focus {:path [0 0], :offset 14}}]
+                [:selection-toggle-attribute [:style :font-weight] "bold"]]
+       state (redo initial-state intents)]
+   state)
  := {:anchor {:offset 0, :path [0 1]},
      :content
      {:attrs {},
       :content
       [{:attrs {},
-        :content [{:attrs {}, :content ["Type "], :tag :span, :type :element}
-                  {:attrs {:style {:font-weight "bold"}},
-                   :content ["something bold awesome"],
-                   :tag :span,
-                   :type :element}],
+        :content
+        [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+         {:attrs {:style {:font-weight "bold"}},
+          :content ["something"],
+          :tag :span,
+          :type :element}
+         {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
         :tag :div,
         :type :element}],
       :tag :div,
       :type :element},
-     :focus {:offset 22, :path [0 1]}})
+     :focus {:offset 0, :path [0 2]},
+     :history [[:set-selection
+                {:anchor {:offset 8, :path [0 0]}, :focus {:offset 8, :path [0 0]}}]
+               [:set-selection
+                {:anchor {:offset 5, :path [0 0]},
+                 :focus {:offset 14, :path [0 0]}}]
+               [:selection-toggle-attribute [:style :font-weight] "bold"]]})
 
 (defn insert-marked-text
   "Inserts this marked text at the current cursor."
@@ -707,27 +704,20 @@
           parent-node       (hickory-get-in content parent-path)
           sibling-nodes     (:content parent-node)
           start-index       (last (:path start-point))
-          start-text-offset (node-index-and-offset->text-offset sibling-nodes {:node-index  start-index
-                                                                               :node-offset (:offset start-point)})
+          start-text-offset (node-index-and-offset->text-index sibling-nodes {:node-index  start-index
+                                                                                 :node-offset (:offset start-point)})
           new-sibling-nodes (-> sibling-nodes
                                 (text-nodes->marked-text)
-                                (update-subvec (cond-> (:character-index start-text-offset)
-                                                 (= (:side-of-character start-text-offset) :right)
-                                                 inc)
-                                               (cond-> (:character-index start-text-offset)
-                                                 (= (:side-of-character start-text-offset) :right)
-                                                 inc)
+                                (update-subvec (:text-index start-text-offset)
+                                               (:text-index start-text-offset)
                                                (fn [_]
                                                  marked-text))
                                 (marked-text->text-nodes))
-          new-character-index (cond-> (+ (count marked-text)
-                                         (:character-index start-text-offset))
-                                ;; If the cursor was originally to the left of the current character, switch to the right of the last character
-                                (= (:side-of-character start-text-offset) :left)
-                                dec)
+          new-character-index (+ (count marked-text)
+                                 (:text-index start-text-offset))
           {new-start-index  :node-index
-           new-start-offset :node-offset} (text-offset->node-index-and-offset new-sibling-nodes {:character-index   new-character-index
-                                                                                                 :side-of-character :right})
+           new-start-offset :node-offset} (text-index->node-index-and-offset new-sibling-nodes {:text-index          new-character-index
+                                                                                                   :node-side-of-cursor :left})
           new-start-point   {:path   (conj parent-path new-start-index)
                              :offset new-start-offset}
           new-content       (hickory-update-in content parent-path
@@ -738,6 +728,39 @@
                     :focus   new-start-point}))
     ;; if there's no marked-text
     state))
+
+(tests
+ "Insert text after making the cursor bold"
+ (let [intents [[:set-selection
+                 {:anchor {:path [0 0], :offset 15},
+                  :focus {:path [0 0], :offset 15}}]
+                [:selection-toggle-attribute [:style :font-weight] "bold"]]
+       state (redo initial-state intents)
+       marked-text [["b" {:style {:font-weight "bold"}}]]]
+   state
+   (insert-marked-text state marked-text))
+ := {:active-attrs {:style {:font-weight "bold"}},
+     :anchor {:offset 1, :path [0 1]},
+     :content
+     {:attrs {},
+      :content
+      [{:attrs {},
+        :content
+        [{:attrs {}, :content ["Type something "], :tag :span, :type :element}
+         {:attrs {:style {:font-weight "bold"}},
+          :content ["b"],
+          :tag :span,
+          :type :element}
+         {:attrs {}, :content ["awesome"], :tag :span, :type :element}],
+        :tag :div,
+        :type :element}],
+      :tag :div,
+      :type :element},
+     :focus {:offset 1, :path [0 1]},
+     :history [[:set-selection
+                {:anchor {:offset 15, :path [0 0]},
+                 :focus {:offset 15, :path [0 0]}}]
+               [:selection-toggle-attribute [:style :font-weight] "bold"]]})
 
 (defn things-in-both
   "Recursively diffs a and b to find the common values. Maps are subdiffed where keys match and values differ."
@@ -938,7 +961,9 @@
         (update :history (fnil conj []) intent-v)
         (intent-handler intent-v))))
 
-(defn redo [state intents]
+(defn redo
+  "Decodes a list of intents, executing them on this state"
+  [state intents]
   (reduce wrapped-intent-handler
           state
           intents))
