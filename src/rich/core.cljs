@@ -403,15 +403,15 @@
                   {:attrs {}, :content ["awesome"], :tag :span, :type :element}])
 
  (node-index-and-offset->text-index text-nodes {:node-index 0 :node-offset 5})
- := {:side-of-character :right, :character-index 4}
+ := {:text-index 5, :node-side-of-index :left}
 
- (text-index->node-index-and-offset text-nodes {:character-index 4 :side-of-character :right})
+ (text-index->node-index-and-offset text-nodes {:text-index 5, :node-side-of-index :left})
  := {:node-index 0, :node-offset 5}
 
  (node-index-and-offset->text-index text-nodes {:node-index 1 :node-offset 0})
- := {:side-of-character :left, :character-index 5}
+ := {:text-index 5, :node-side-of-index :right}
 
- (text-index->node-index-and-offset text-nodes {:character-index 5 :side-of-character :left})
+ (text-index->node-index-and-offset text-nodes {:text-index 5, :node-side-of-index :right})
  := {:node-index 1, :node-offset 0}
 )
 
