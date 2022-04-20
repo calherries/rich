@@ -164,20 +164,45 @@
   (first (:content text-node)))
 
 (defn split-text-node-at
-  "Splits this text-node at this character offset."
+  "Splits this text-node at this character offset.
+   If any node's contents are empty, it is nil in the final result."
   [text-node offset]
-  (let [[before-text after-text] (map #(apply str %) (split-at offset (text-node->text text-node)))]
-    [(assoc text-node :content [before-text])
-     (assoc text-node :content [after-text])]))
+  (let [split-text (->> text-node
+                        text-node->text
+                        (split-at offset)
+                        (map #(apply str %)))]
+    (->> split-text
+         (map (fn [text]
+                (when (not-empty text)
+                  (assoc text-node :content [text]))))
+         (vec))))
 
 (defn split-text-nodes-at
-  "Splits this list of text-nodes into two arrays of text nodes at this point"
+  "Splits this list of text-nodes into two arrays of text nodes at this point.
+   If any text-node's contents are emtpy, it is left out of the final result."
   [text-nodes {:keys [offset node-index]}]
-  (p [text-nodes {:keys [offset node-index]}])
   (let [[before [at-index & after]]      (split-at node-index text-nodes)
         [at-index-before at-index-after] (split-text-node-at at-index offset)]
-    [(conj (vec before) at-index-before)
-     (vec (cons at-index-after after))]))
+    [(cond-> (vec before)
+       at-index-before
+       (conj at-index-before))
+     (vec (cond->> after
+            at-index-after
+            (cons at-index-after)))]))
+
+(tests
+  (let [text-nodes [{:attrs {}, :content ["Type some"], :tag :span, :type :element}
+                    {:attrs {:style {:font-weight "bold"}},
+                     :content ["thing awesome"],
+                     :tag :span,
+                     :type :element}]]
+    (split-text-nodes-at text-nodes {:offset 9 :node-index 0}))
+    := [[{:attrs {}, :content ["Type some"], :tag :span, :type :element}]
+        [{:attrs {:style {:font-weight "bold"}},
+          :content ["thing awesome"],
+          :tag :span,
+          :type :element}]]
+  )
 
 (defn hickory-zip
   "Returns a zipper for hickory maps given a root element."
@@ -516,27 +541,64 @@
   (lexicographic-less-than [(:path focus) (:offset focus)]
                            [(:path anchor) (:offset anchor)]))
 
+(defn maybe-merge-text-nodes [first-text-node second-text-node]
+  (if (= (dissoc first-text-node :content) (dissoc second-text-node :content))
+    [(assoc first-text-node :content [(str (text-node->text first-text-node)
+                                           (text-node->text second-text-node))])]
+    (if (not-empty (text-node->text second-text-node))
+      [first-text-node]
+      [first-text-node second-text-node])))
+
+(defn merge-backwards
+  "Recursively merges the the node at this path with the previous sibling node.
+   Adds the children of the current block node to the previous block node, and merges them.
+   Assumes there are two consecutive block nodes."
+  [state {:keys [path]}]
+  (let [content      (:content state)
+        prev-path    (path-left path)
+        node         (hickory-get-in content path)
+        node-content (:content node)
+        prev-node    (hickory-get-in content prev-path)
+        prev-node    (update prev-node :content (fn [prev-node-content]
+                                                  ;; Merge the last leaf node with the previous node if it has the same attrs, or it's empty
+                                                  ;; Assumes the children are all leaf nodes
+                                                  (vec (concat (butlast prev-node-content)
+                                                               (maybe-merge-text-nodes (last prev-node-content) (first node-content))
+                                                               (rest node-content)))))
+        new-content  (-> content
+                         (hickory-assoc-in prev-path prev-node)
+                         (hickory-dissoc-in path))]
+    (assoc state :content new-content)))
+
 (defn delete-backwards
   "Returns a new state after deleting a unit of characters starting from a given point."
   [state {:keys [path offset unit]}]
   (if (= offset 0)
     ;; We are deleting from the start of the leaf, so we need to delete into the previous leaf
     (let [prev-zip (second (leaf-zips-before (zip-get-in (hickory-zip (:content state)) path)))]
-      (if (nil? prev-zip)
-        ;; Do nothing. We are at the first leaf, and we can't delete further
-        state
+      (if (seq prev-zip)
         ;; Delete backwards from the end of the previous leaf.
         (let [prev-path    (path-to-zip prev-zip)
               prev-node    (zip/node prev-zip)
-              text-content (first (:content prev-node))]
-          (delete-backwards (-> state
-                                (assoc :anchor {:path   prev-path
-                                                :offset (count text-content)})
-                                (assoc :focus {:path   prev-path
-                                               :offset (count text-content)}))
-                            {:path   prev-path
-                             :offset (count text-content)
-                             :unit   unit}))))
+              text-content (first (:content prev-node))
+              new-point    {:path   prev-path
+                            :offset (count text-content)}]
+          (if (path-left path)
+            ;; Delete from the previous sibling node node
+            (delete-backwards (-> state
+                                  (assoc :anchor new-point)
+                                  (assoc :focus new-point))
+                              {:path   prev-path
+                               :offset (count text-content)
+                               :unit   unit})
+            ;; Merge the current parent with the previous
+            (let [parent-path (vec (butlast path))]
+              (-> state
+                  (merge-backwards {:path parent-path})
+                  (assoc :anchor new-point)
+                  (assoc :focus new-point)))))
+        ;; If we are at the first leaf, and we can't delete further, do nothing.
+        state))
     (-> state
         (assoc-in [:anchor :offset] (dec offset))
         (assoc-in [:focus :offset] (dec offset))
@@ -544,6 +606,47 @@
                 (fn [old-text]
                   (let [[before after] (split-at offset old-text)]
                     (str/join (concat (str/join (butlast (seq before))) after))))))))
+
+(tests
+ "Deleting at the start of a block should merge text nodes together"
+ (let [state initial-state
+       intents [[:set-selection
+                 {:anchor {:path [0 0], :offset 9}, :focus {:path [0 0], :offset 9}}]
+                [:set-selection
+                 {:anchor {:path [0 0], :offset 5},
+                  :focus {:path [0 0], :offset 14}}]
+                [:selection-toggle-attribute [:style :font-weight] "bold"]
+                [:set-selection
+                 {:anchor {:path [0 1], :offset 4}, :focus {:path [0 1], :offset 4}}]
+                [:insert-paragraph]
+                [:delete-content-backward]]]
+   (redo state intents))
+ := {:anchor {:offset 4, :path [0 1]},
+     :content
+     {:attrs {},
+      :content
+      [{:attrs {},
+        :content
+        [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+         {:attrs {:style {:font-weight "bold"}},
+          :content ["something"],
+          :tag :span,
+          :type :element}
+         {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
+        :tag :div,
+        :type :element}],
+      :tag :div,
+      :type :element},
+     :focus {:offset 4, :path [0 1]},
+     :history [[:set-selection
+                {:anchor {:offset 9, :path [0 0]}, :focus {:offset 9, :path [0 0]}}]
+               [:set-selection
+                {:anchor {:offset 5, :path [0 0]},
+                 :focus {:offset 14, :path [0 0]}}]
+               [:selection-toggle-attribute [:style :font-weight] "bold"]
+               [:set-selection
+                {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]
+               [:insert-paragraph] [:delete-content-backward]]})
 
 (defn selection?
   "Returns true if there is a selection of text."
@@ -918,23 +1021,6 @@
   [state [_ text]]
   (insert-text state text))
 
-(tests
-  (let [text-nodes [{:attrs {}, :content ["Type something "], :tag :span, :type :element}
-                    {:attrs {:style {:font-style "italic", :font-weight "bold"}},
-                     :content ["bold and "],
-                     :tag :span,
-                     :type :element}
-                    {:attrs {}, :content ["awesome"], :tag :span, :type :element}]]
-    (split-text-nodes-at text-nodes {:offset 20 :node-index 0}))
-    := [[{:attrs {}, :content ["Type something "], :tag :span, :type :element}]
-        [{:attrs {}, :content [""], :tag :span, :type :element}
-         {:attrs {:style {:font-style "italic", :font-weight "bold"}},
-          :content ["bold and "],
-          :tag :span,
-          :type :element}
-         {:attrs {}, :content ["awesome"], :tag :span, :type :element}]]
-  )
-
 (defn insert-paragraph-at-selection-start
   "Inserts a paragraph at the start of the selection.
    Assumes the selection is collapsed."
@@ -949,7 +1035,7 @@
         parent-siblings    (:content parent-parent)
         sibling-nodes      (:content parent-node)
         start-index        (last (:path start-point))
-        ;; Split the text nodes in the parent
+        ;; split the text nodes in the parent
         [first-nodes second-nodes] (split-text-nodes-at sibling-nodes {:offset     (:offset start-point)
                                                                        :node-index start-index})
         ;; clone the parent
@@ -1141,7 +1227,7 @@
 (defn element-in-editable?
   "Returns the root element of the editable component"
   [element]
-  (.closest element "#rich-editable"))
+  (.closest element "[data-rich-root]"))
 
 (defn editable-element?
   "Returns true if this element is a node element of the editable component."
@@ -1223,7 +1309,7 @@
         (.removeEventListener (rdom/dom-node this) "beforeinput" on-before-input))
       :component-did-update
       (fn [this]
-        (when-let [selection (get-selection)]
+        (let [selection (get-selection)]
           (let [selection-values (fn [s]
                                    (select-paths s [[:anchor :path] [:anchor :offset]
                                                     [:focus :path] [:focus :offset]]))]
