@@ -1,11 +1,8 @@
 (ns rich.core
-  (:require [applied-science.js-interop :as j]
-            [clojure.core.match :refer-macros [match]]
-            [clojure.data :as data]
+  (:require [clojure.data :as data]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.zip :as zip]
-            [lambdaisland.deep-diff2 :as deep-diff]
             ["lodash.debounce" :as debounce]
             ["lodash.throttle" :as throttle]
             [hyperfiddle.rcf :refer [tests]]
@@ -1215,20 +1212,8 @@
 (def state
   (r/atom initial-state))
 
-(comment
-  (do (remove-watch state :state-watcher)
-      (add-watch state :state-watcher
-                 (fn [_key _atom old-state new-state]
-                   (when (not= old-state new-state)
-                     (-> (deep-diff/diff old-state new-state)
-                         deep-diff/pretty-print
-                         with-out-str
-                         p))))))
-
-
 (def wrapped-intent-handler
   (fn [state intent-v]
-    (js/console.log intent-v)
     (-> state
         (update :history (fnil conj []) intent-v)
         (intent-handler intent-v))))
@@ -1239,16 +1224,6 @@
   (reduce wrapped-intent-handler
           state
           intents))
-
-(comment
-  (let [intents [[:set-selection
-                  {:anchor {:path [0 0], :offset 15},
-                   :focus {:path [0 0], :offset 22}}]
-                 [:selection-toggle-attribute [:style :font-weight] "bold"]
-                 [:insert-text "b"]]]
-    (swap! state redo intents))
-  (swap! state redo [[:insert-text "b"]])
-  (redo @state [[:insert-text "b"]]))
 
 ;;;;;;;;
 ;; DOM
@@ -1379,22 +1354,22 @@
         (.removeEventListener (rdom/dom-node this) "beforeinput" on-before-input))
       :component-did-update
       (fn [this]
-        (let [selection (get-selection)]
-          (let [selection-values (fn [s]
-                                   (select-paths s [[:anchor :path] [:anchor :offset]
-                                                    [:focus :path] [:focus :offset]]))]
+        (let [selection        (get-selection)
+              selection-values (fn [s]
+                                 (select-paths s [[:anchor :path] [:anchor :offset]
+                                                  [:focus :path] [:focus :offset]]))]
             ;; DOM selection is out of sync, so update it.
-            (when (not= (selection-values selection) (selection-values @state))
-              (let [{:keys [start-point end-point]} (range-from-selection @state)
-                    dom-range                       (js/window.document.createRange)
-                    dom-selection                   (js/window.getSelection)]
-                (.setStart dom-range (find-element (conj (:path start-point) 0)) (:offset start-point))
-                (.setEnd dom-range (find-element (conj (:path end-point) 0)) (:offset end-point))
-                (.setBaseAndExtent dom-selection
-                                   (.-startContainer dom-range)
-                                   (.-startOffset dom-range)
-                                   (.-endContainer dom-range)
-                                   (.-endOffset dom-range)))))))
+          (when (not= (selection-values selection) (selection-values @state))
+            (let [{:keys [start-point end-point]} (range-from-selection @state)
+                  dom-range                       (js/window.document.createRange)
+                  dom-selection                   (js/window.getSelection)]
+              (.setStart dom-range (find-element (conj (:path start-point) 0)) (:offset start-point))
+              (.setEnd dom-range (find-element (conj (:path end-point) 0)) (:offset end-point))
+              (.setBaseAndExtent dom-selection
+                                 (.-startContainer dom-range)
+                                 (.-startOffset dom-range)
+                                 (.-endContainer dom-range)
+                                 (.-endOffset dom-range))))))
       :reagent-render
       (fn []
         (let [content (:content @state)]

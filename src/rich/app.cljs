@@ -4,8 +4,6 @@
             [reagent.dom :as rdom]
             [clojure.pprint :as pprint]))
 
-(enable-console-print!)
-
 (defn app []
   [:div {:style {:padding        "10px"
                  :min-height     "100px"
@@ -21,7 +19,9 @@
                   :white-space   "pre-wrap"
                   :overflow-wrap "break-word"}}
     (-> @rich/state
-        (update :content (comp rich/hickory->hiccup rich/minimized-hickory))
+        :content
+        rich/minimized-hickory
+        rich/hickory->hiccup
         pprint/pprint
         with-out-str)]])
 
@@ -39,4 +39,5 @@
   (set! hyperfiddle.rcf/*enabled* false))
 
 (defn ^:export init []
+  (enable-console-print!)
   (start))
