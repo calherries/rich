@@ -9,9 +9,12 @@
 <br/>
 
 <p align="center">
-  <a href="#"><img src="./docs/images/awesome-demo.gif" /></a>
+  <a href="#"><img src="./docs/images/awesome-demo.gif" /></a> ·
+  <a href="https://beautiful-haupia-5c51c7.netlify.app/"><strong>Demo</strong></a> ·
+</p>
+<br/>
 </p>
 
-## Warning: 
+## Warning:
 This project is in its early stages of development. 
 Do not use.
