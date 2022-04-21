@@ -12,5 +12,4 @@
    :modules           {:main {:init-fn rich.app/init}}
    :asset-path        "/js"
    :output-dir        "resources/public/js"
-   :build-hooks       [(shadow.cljs.build-report/hook)]
-   :release           {:output-dir "resources/public/js/release/rich"}}}}
+   :build-hooks       [(shadow.cljs.build-report/hook)]}}}
