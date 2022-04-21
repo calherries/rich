@@ -205,22 +205,21 @@
                         (map #(apply str %)))]
     (->> split-text
          (map (fn [text]
-                (when (not-empty text)
-                  (assoc text-node :content [text]))))
+                (assoc text-node :content [text])))
          (vec))))
 
 (defn split-text-nodes-at
-  "Splits this list of text-nodes into two arrays of text nodes at this point.
-   If any text-node's contents are emtpy, it is left out of the final result."
+  "Splits this non-empty list of text-nodes into two arrays of text nodes at this point.
+   If there is at least one text node in each array the empty text nodes are removed."
   [text-nodes {:keys [offset node-index]}]
   (let [[before [at-index & after]]      (split-at node-index text-nodes)
         [at-index-before at-index-after] (split-text-node-at at-index offset)]
-    [(cond-> (vec before)
-       at-index-before
-       (conj at-index-before))
-     (vec (cond->> after
-            at-index-after
-            (cons at-index-after)))]))
+    (->> [(conj (vec before) at-index-before)
+          (vec (cons at-index-after after))]
+         (mapv (fn [text-nodes]
+                 (cond->> text-nodes
+                   (not= (count text-nodes) 1)
+                   (filterv #(not-empty (text-node->text %)))))))))
 
 (tests
  (let [text-nodes [{:attrs {}, :content ["Type some"], :tag :span, :type :element}
@@ -232,6 +231,17 @@
  := [[{:attrs {}, :content ["Type some"], :tag :span, :type :element}]
      [{:attrs {:style {:font-weight "bold"}},
        :content ["thing awesome"],
+       :tag :span,
+       :type :element}]]
+
+ (let [text-nodes [{:attrs {:style {:font-weight "bold"}}, :content ["Type some"], :tag :span, :type :element}]]
+   (split-text-nodes-at text-nodes {:offset 9 :node-index 0}))
+ := [[{:attrs {:style {:font-weight "bold"}},
+       :content ["Type some"],
+       :tag :span,
+       :type :element}]
+     [{:attrs {:style {:font-weight "bold"}},
+       :content [""],
        :tag :span,
        :type :element}]])
 
@@ -575,7 +585,7 @@
   (if (= (dissoc first-text-node :content) (dissoc second-text-node :content))
     [(assoc first-text-node :content [(str (text-node->text first-text-node)
                                            (text-node->text second-text-node))])]
-    (if (not-empty (text-node->text second-text-node))
+    (if (empty? (text-node->text second-text-node))
       [first-text-node]
       [first-text-node second-text-node])))
 
@@ -630,7 +640,7 @@
         ;; Delete backwards from the end of the previous leaf.
         (let [prev-path    (path-to-zip prev-zip)
               prev-node    (zip/node prev-zip)
-              text-content (first (:content prev-node))
+              text-content (text-node->text prev-node)
               new-point    {:path   prev-path
                             :offset (count text-content)}]
           (if (path-left path)
@@ -1310,9 +1320,15 @@
   (let [selection (.getSelection js/window)]
     (when (some-> selection .-anchorNode .-parentElement element-in-editable?)
       {:anchor {:path   (path-to-element (.-parentElement (.-anchorNode selection)) root-element?)
-                :offset (.-anchorOffset selection)}
+                :offset (if (= (.-textContent (.-anchorNode selection)) "\uFEFF")
+                          ;; If the text at the point is an empty character, the offset is zero, not one.
+                          0
+                          (.-anchorOffset selection))}
        :focus  {:path   (path-to-element (.-parentElement (.-focusNode selection)) root-element?)
-                :offset (.-focusOffset selection)}})))
+                :offset (if (= (.-textContent (.-focusNode selection)) "\uFEFF")
+                          ;; If the text at the point is an empty character, the offset is zero, not one.
+                          0
+                          (.-focusOffset selection))}})))
 
 (defn editable
   []
@@ -1327,6 +1343,7 @@
         debounced-selection-change (debounce on-selection-change 0)
         on-before-input            (fn [e]
                                      (.preventDefault e)
+
                                      ;; Some IMEs/Chrome extensions like e.g. Grammarly set the selection immediately before
                                      ;; triggering a `beforeinput` expecting the change to be applied to the immediately before
                                      ;; set selection.
