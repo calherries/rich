@@ -4,14 +4,18 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "watch": "shadow-cljs watch app",
+    "compile": "shadow-cljs compile app",
+    "build": "shadow-cljs release app",
+    "repl": "shadow-cljs cljs-repl app"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/calherries/rich.git"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "calherries",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/calherries/rich/issues"
   },
