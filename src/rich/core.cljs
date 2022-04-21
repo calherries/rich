@@ -34,8 +34,8 @@
        (cons (first s) nil)
        (cons (first s) (take-until pred (rest s)))))))
 
-;;;;;;;;;;;;;;;;;;;;
-;; DEEPLY NESTED DATA
+;;;;;;;;;;;;
+;; VECTORS
 
 (defn lexicographic-less-than
   "Like <, but also compares (deeply-nested) vectors lexicographically."
@@ -51,6 +51,35 @@
   "Inserts this element in this vector at this index."
   [v index el]
   (vec (concat (subvec v 0 index) [el] (subvec v index))))
+
+(defn update-subvec
+  "Updates the subvector with this function.
+   Flattens the results back into the original vector"
+  [v start end f]
+  (-> (subvec v 0 start)
+      (into (f (subvec v start end)))
+      (into (subvec v end))))
+
+(defn replace-subvec
+  "Replaces this subvector with another subvector."
+  [v start end xs]
+  (update-subvec v start end (fn [] xs)))
+
+(defn remove-subvec
+  "Removes this subvector."
+  [v start end]
+  (update-subvec v start end (fn [] [])))
+
+(tests
+ (update-subvec [0 1 2 3] 1 3 (fn [xs] (map #(* 100 %) xs)))
+ := [0 100 200 3]
+ (replace-subvec [0 1 2 3] 1 3 [100])
+ := [0 100 3]
+ (remove-subvec [0 1 2 3] 1 3)
+ := [0 3])
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DEEPLY NESTED DATA STRUCTURES
 
 (defn dissoc-in
   "Dissociate a value in a nested associative structure, identified by a sequence
@@ -149,8 +178,8 @@
   (conj (vec (butlast path)) (inc (last path))))
 
 (tests
-  (update-path-with-delete [0 2] [0 0]) := [0 1]
-  (update-path-with-insert-right [0 2] [0 1]) := [0 3])
+ (update-path-with-delete [0 2] [0 0]) := [0 1]
+ (update-path-with-insert-right [0 2] [0 1]) := [0 3])
 
 ;;;;;;;;;;;;;;;;
 ;; HICKORY
@@ -162,6 +191,9 @@
 
 (defn text-node->text [text-node]
   (first (:content text-node)))
+
+(def empty-text-node
+  {:attrs {}, :content [""], :tag :span, :type :element})
 
 (defn split-text-node-at
   "Splits this text-node at this character offset.
@@ -191,18 +223,17 @@
             (cons at-index-after)))]))
 
 (tests
-  (let [text-nodes [{:attrs {}, :content ["Type some"], :tag :span, :type :element}
-                    {:attrs {:style {:font-weight "bold"}},
-                     :content ["thing awesome"],
-                     :tag :span,
-                     :type :element}]]
-    (split-text-nodes-at text-nodes {:offset 9 :node-index 0}))
-    := [[{:attrs {}, :content ["Type some"], :tag :span, :type :element}]
-        [{:attrs {:style {:font-weight "bold"}},
-          :content ["thing awesome"],
-          :tag :span,
-          :type :element}]]
-  )
+ (let [text-nodes [{:attrs {}, :content ["Type some"], :tag :span, :type :element}
+                   {:attrs {:style {:font-weight "bold"}},
+                    :content ["thing awesome"],
+                    :tag :span,
+                    :type :element}]]
+   (split-text-nodes-at text-nodes {:offset 9 :node-index 0}))
+ := [[{:attrs {}, :content ["Type some"], :tag :span, :type :element}]
+     [{:attrs {:style {:font-weight "bold"}},
+       :content ["thing awesome"],
+       :tag :span,
+       :type :element}]])
 
 (defn hickory-zip
   "Returns a zipper for hickory maps given a root element."
@@ -276,7 +307,7 @@
                   ;; COMPAT: Browsers will collapse trailing new lines at the end of blocks,
                   ;; so we need to add an extra trailing new lines to prevent that.
                   (if (and (string? node)
-                        (= (last node) "\n"))
+                           (= (last node) "\n"))
                     (str node "\n")
                     node))
                 hickory))
@@ -452,8 +483,7 @@
  := {:text-index 5, :node-side-of-index :right}
 
  (text-index->node-index-and-offset text-nodes {:text-index 5, :node-side-of-index :right})
- := {:node-index 1, :node-offset 0}
-)
+ := {:node-index 1, :node-offset 0})
 
 ;;;;;;;;;;;;;;;;;;;;
 ;; ZIP UTILS
@@ -570,9 +600,29 @@
                          (hickory-dissoc-in path))]
     (assoc state :content new-content)))
 
+(defn search-backwards
+  "Returns the first index where (pred item) returns true, starting from an index and searching backwards.
+   The search does not include the item at the start index."
+  [xs pred start]
+  (loop [i (dec start)]
+    (cond
+      (neg? i)
+      nil
+      (pred (nth xs i))
+      i
+      :else
+      (recur (dec i)))))
+
+(tests
+ (let [xs    [1 0 0 4 0 5]
+       start 4
+       pred  #(= % 0)]
+   (search-backwards xs pred start))
+ := 2)
+
 (defn delete-backwards
-  "Returns a new state after deleting a unit of characters starting from a given point."
-  [state {:keys [path offset unit]}]
+  "Returns a new state after deleting a unit of characters, starting from a given point."
+  [state {:keys [path offset unit] :as start-point}]
   (if (= offset 0)
     ;; We are deleting from the start of the leaf, so we need to delete into the previous leaf
     (let [prev-zip (second (leaf-zips-before (zip-get-in (hickory-zip (:content state)) path)))]
@@ -591,7 +641,7 @@
                               {:path   prev-path
                                :offset (count text-content)
                                :unit   unit})
-            ;; Merge the current parent with the previous
+            ;; If there is no text-node to the left, merge the current parent (assumed to be a block) with the previous (another block)
             (let [parent-path (vec (butlast path))]
               (-> state
                   (merge-backwards {:path parent-path})
@@ -599,13 +649,37 @@
                   (assoc :focus new-point)))))
         ;; If we are at the first leaf, and we can't delete further, do nothing.
         state))
-    (-> state
-        (assoc-in [:anchor :offset] (dec offset))
-        (assoc-in [:focus :offset] (dec offset))
-        (update :content hickory-update-text path
-                (fn [old-text]
-                  (let [[before after] (split-at offset old-text)]
-                    (str/join (concat (str/join (butlast (seq before))) after))))))))
+    (let [content           (:content state)
+          parent-path       (vec (butlast (:path start-point)))
+          parent-node       (hickory-get-in content parent-path)
+          sibling-nodes     (:content parent-node)
+          start-index       (last (:path start-point))
+          {start-text-index :text-index} (node-index-and-offset->text-index sibling-nodes {:node-index  start-index
+                                                                                           :node-offset (:offset start-point)})
+          marked-text       (text-nodes->marked-text sibling-nodes)
+          delete-to-index   (case unit
+                              :char (dec start-text-index) ; start-text-index > 0 as offset > 0
+                              :word (let [index (search-backwards marked-text (fn [[char _]] (= char " ")) start-text-index)]
+                                      (if (nil? index)
+                                        0
+                                        (inc index)))
+                              :line  0)
+          new-marked-text   (remove-subvec marked-text delete-to-index start-text-index)
+          new-sibling-nodes (marked-text->text-nodes new-marked-text)
+          new-sibling-nodes (if (empty? new-sibling-nodes)
+                              [empty-text-node]
+                              new-sibling-nodes)
+          {new-start-index  :node-index
+           new-start-offset :node-offset} (text-index->node-index-and-offset new-sibling-nodes {:text-index         delete-to-index
+                                                                                                :node-side-of-index :right})
+          new-start-point   {:path   (conj parent-path new-start-index)
+                             :offset new-start-offset}
+          new-content       (hickory-update-in content parent-path
+                                               (fn [parent-node]
+                                                 (assoc parent-node :content new-sibling-nodes)))]
+      (merge state {:content new-content
+                    :anchor  new-start-point
+                    :focus   new-start-point}))))
 
 (tests
  "Deleting at the start of a block should merge text nodes together"
@@ -677,26 +751,6 @@
       (assoc state :anchor (:focus state))
       (assoc state :focus (:anchor state)))))
 
-(defn update-subvec
-  "Updates the subvector with this function.
-   Flattens the results back into the original vector"
-  [v start end f]
-  (-> (subvec v 0 start)
-      (into (f (subvec v start end)))
-      (into (subvec v end))))
-
-(defn replace-subvec
-  "Replaces this subvector with another subvector."
-  [v start end xs]
-  (update-subvec v start end (fn [] xs)))
-
-(tests
-  (update-subvec [0 1 2 3] 1 3 (fn [xs] (map #(* 100 %) xs)))
-  := [0 100 200 3]
-  (replace-subvec [0 1 2 3] 1 3 [100])
-  := [0 100 3]
- )
-
 (defn update-selection-attrs
   "Updates all the text in the current selected range with this function."
   [state update-fn]
@@ -708,9 +762,9 @@
         start-index       (last (:path start-point))
         end-index         (last (:path end-point))
         start-text-offset (node-index-and-offset->text-index sibling-nodes {:node-index  start-index
-                                                                             :node-offset (:offset start-point)})
+                                                                            :node-offset (:offset start-point)})
         end-text-offset   (node-index-and-offset->text-index sibling-nodes {:node-index  end-index
-                                                                             :node-offset (:offset end-point)})
+                                                                            :node-offset (:offset end-point)})
         new-sibling-nodes (-> sibling-nodes
                               (text-nodes->marked-text)
                               (update-subvec (:text-index start-text-offset)
@@ -781,7 +835,7 @@
           sibling-nodes     (:content parent-node)
           start-index       (last (:path start-point))
           start-text-offset (node-index-and-offset->text-index sibling-nodes {:node-index  start-index
-                                                                                 :node-offset (:offset start-point)})
+                                                                              :node-offset (:offset start-point)})
           new-sibling-nodes (-> sibling-nodes
                                 (text-nodes->marked-text)
                                 (update-subvec (:text-index start-text-offset)
@@ -861,37 +915,37 @@
     (universal-leaf-attrs content (:path start-point) end-path)))
 
 (tests
-  (let [state {:anchor {:offset 12, :path [0]},
-               :content {:attrs {},
-                         :content [{:attrs {:style {:font-size "1em"}},
-                                    :content ["Type something awesome"],
-                                    :tag :span,
-                                    :type :element}],
-                         :tag :div,
-                         :type :element},
-               :focus {:offset 19, :path [0]}}]
-    (universal-leaf-attrs-in-selection state))
-  := {:style {:font-size "1em"}}
-  (let [state {:anchor {:offset 0, :path [1]},
-               :content {:attrs {},
-                         :content [{:attrs {:style {:font-size "1em"}},
-                                    :content ["Type someth"],
-                                    :tag :span,
-                                    :type :element}
-                                   {:attrs {:style
-                                            {:font-size "1em", :font-weight "bold"}},
-                                    :content ["ing awe"],
-                                    :tag :span,
-                                    :type :element}
-                                   {:attrs {:style {:font-size "1em"}},
-                                    :content ["some"],
-                                    :tag :span,
-                                    :type :element}],
-                         :tag :div,
-                         :type :element},
-               :focus {:offset 7, :path [1]}}]
-    (universal-leaf-attrs-in-selection state))
-  := {:style {:font-size "1em", :font-weight "bold"}})
+ (let [state {:anchor {:offset 12, :path [0]},
+              :content {:attrs {},
+                        :content [{:attrs {:style {:font-size "1em"}},
+                                   :content ["Type something awesome"],
+                                   :tag :span,
+                                   :type :element}],
+                        :tag :div,
+                        :type :element},
+              :focus {:offset 19, :path [0]}}]
+   (universal-leaf-attrs-in-selection state))
+ := {:style {:font-size "1em"}}
+ (let [state {:anchor {:offset 0, :path [1]},
+              :content {:attrs {},
+                        :content [{:attrs {:style {:font-size "1em"}},
+                                   :content ["Type someth"],
+                                   :tag :span,
+                                   :type :element}
+                                  {:attrs {:style
+                                           {:font-size "1em", :font-weight "bold"}},
+                                   :content ["ing awe"],
+                                   :tag :span,
+                                   :type :element}
+                                  {:attrs {:style {:font-size "1em"}},
+                                   :content ["some"],
+                                   :tag :span,
+                                   :type :element}],
+                        :tag :div,
+                        :type :element},
+              :focus {:offset 7, :path [1]}}]
+   (universal-leaf-attrs-in-selection state))
+ := {:style {:font-size "1em", :font-weight "bold"}})
 
 
 ;;;;;;;;;;;;;;;;;;;;;
@@ -910,7 +964,7 @@
              :type    :element}})
 
 (defmulti intent-handler (fn [_state intent-v]
-                          (first intent-v)))
+                           (first intent-v)))
 
 ;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
 (defn selection-toggle-attribute
@@ -977,8 +1031,7 @@
                  :focus {:offset 15, :path [0 0]}}]
                [:selection-toggle-attribute [:style :font-weight] "bold"]
                [:selection-toggle-attribute [:style :font-style] "italic"]
-               [:insert-text "b"]]}
-  )
+               [:insert-text "b"]]})
 
 (defmethod intent-handler :selection-toggle-attribute
   [state [_ attr-path value]]
@@ -1056,61 +1109,60 @@
         (assoc :focus new-point))))
 
 (tests
-  (let [state {:anchor {:offset 4, :path [0 1]},
+ (let [state {:anchor {:offset 4, :path [0 1]},
+              :content
+              {:attrs {},
                :content
-               {:attrs {},
-                :content
-                [{:attrs {},
-                  :content
-                  [{:attrs {}, :content ["Type "], :tag :span, :type :element}
-                   {:attrs {:style {:font-weight "bold"}},
-                    :content ["something"],
-                    :tag :span,
-                    :type :element}
-                   {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
-                  :tag :div,
-                  :type :element}],
-                :tag :div,
-                :type :element},
-               :focus {:offset 4, :path [0 1]},
-               :history
-               [[:set-selection
-                 {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
-                [:selection-toggle-attribute [:style :font-weight] "bold"]
-                [:set-selection
-                 {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]}]
-    (insert-paragraph-at-selection-start state))
-    := {:anchor {:offset 0, :path [1 0]},
+               [{:attrs {},
+                 :content
+                 [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+                  {:attrs {:style {:font-weight "bold"}},
+                   :content ["something"],
+                   :tag :span,
+                   :type :element}
+                  {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
+                 :tag :div,
+                 :type :element}],
+               :tag :div,
+               :type :element},
+              :focus {:offset 4, :path [0 1]},
+              :history
+              [[:set-selection
+                {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
+               [:selection-toggle-attribute [:style :font-weight] "bold"]
+               [:set-selection
+                {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]}]
+   (insert-paragraph-at-selection-start state))
+ := {:anchor {:offset 0, :path [1 0]},
+     :content
+     {:attrs {},
+      :content
+      [{:attrs {},
+        :content [{:attrs {}, :content ["Type "], :tag :span, :type :element}
+                  {:attrs {:style {:font-weight "bold"}},
+                   :content ["some"],
+                   :tag :span,
+                   :type :element}],
+        :tag :div,
+        :type :element}
+       {:attrs {},
         :content
-        {:attrs {},
-         :content
-         [{:attrs {},
-           :content [{:attrs {}, :content ["Type "], :tag :span, :type :element}
-                     {:attrs {:style {:font-weight "bold"}},
-                      :content ["some"],
-                      :tag :span,
-                      :type :element}],
-           :tag :div,
-           :type :element}
-          {:attrs {},
-           :content
-           [{:attrs {:style {:font-weight "bold"}},
-             :content ["thing"],
-             :tag :span,
-             :type :element}
-            {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
-           :tag :div,
-           :type :element}],
-         :tag :div,
-         :type :element},
-        :focus {:offset 0, :path [1 0]},
-        :history
-        [[:set-selection
-          {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
-         [:selection-toggle-attribute [:style :font-weight] "bold"]
-         [:set-selection
-          {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]}
-  )
+        [{:attrs {:style {:font-weight "bold"}},
+          :content ["thing"],
+          :tag :span,
+          :type :element}
+         {:attrs {}, :content [" awesome"], :tag :span, :type :element}],
+        :tag :div,
+        :type :element}],
+      :tag :div,
+      :type :element},
+     :focus {:offset 0, :path [1 0]},
+     :history
+     [[:set-selection
+       {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
+      [:selection-toggle-attribute [:style :font-weight] "bold"]
+      [:set-selection
+       {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]})
 
 (defn insert-paragraph
   [state]
@@ -1122,24 +1174,24 @@
   [state [_]]
   (insert-paragraph state))
 
-(defn delete-content-backward [state]
+(defn delete-content-backward [state unit]
   (if (selection? state)
     (delete-selection state)
-    (delete-backwards state {:unit   "char"
+    (delete-backwards state {:unit   unit
                              :path   (get-in state [:focus :path])
                              :offset (get-in state [:focus :offset])})))
 
 (defmethod intent-handler :delete-content-backward
   [state [_]]
-  (delete-content-backward state))
+  (delete-content-backward state :char))
 
 (defmethod intent-handler :delete-soft-line-backward
   [state [_]]
-  (delete-content-backward state))
+  (delete-content-backward state :line))
 
 (defmethod intent-handler :delete-word-backward
   [state [_]]
-  (delete-content-backward state))
+  (delete-content-backward state :word))
 
 (defn set-selection [state selection]
   (merge state selection))
@@ -1184,8 +1236,7 @@
                  [:insert-text "b"]]]
     (swap! state redo intents))
   (swap! state redo [[:insert-text "b"]])
-  (redo @state [[:insert-text "b"]])
-  )
+  (redo @state [[:insert-text "b"]]))
 
 ;;;;;;;;
 ;; DOM
@@ -1194,17 +1245,17 @@
   "Returns hickory HTML for the editable component"
   [content]
   (-> (walk/prewalk (fn [node]
-                     (cond
-                       (:tag node)
-                       (-> node
-                           (assoc-in [:attrs :data-rich-node] true)
-                           (update :content (fn [content]
-                                              (if (= content [""])
-                                                ["\uFEFF"]
-                                                content))))
-                       :else
-                       node))
-                 content)
+                      (cond
+                        (:tag node)
+                        (-> node
+                            (assoc-in [:attrs :data-rich-node] true)
+                            (update :content (fn [content]
+                                               (if (= content [""])
+                                                 ["\uFEFF"]
+                                                 content))))
+                        :else
+                        node))
+                    content)
       (assoc-in [:attrs :data-rich-root] true)))
 
 ;; FIXME: needs to take an editor identifier, so there can be more than one editor on the page
