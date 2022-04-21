@@ -1,11 +1,8 @@
 {:paths ["src" "dev"]
- :deps  {org.clojure/core.match     {:mvn/version "1.0.0"}
-         reagent/reagent            {:mvn/version "1.1.0"}
+ :deps  {binaryage/devtools         {:mvn/version "1.0.3"}
          com.hyperfiddle/rcf        {:mvn/version "20220405"}
-         meander/epsilon            {:mvn/version "0.0.650"}
-         hickory/hickory            {:mvn/version "0.7.1"}
-         lambdaisland/deep-diff2    {:mvn/version "2.0.108"}
-         applied-science/js-interop {:mvn/version "0.3.3"}
          com.lambdaisland/dom-types {:mvn/version "0.4.34"}
-         binaryage/devtools         {:mvn/version "1.0.3"}
+         hickory/hickory            {:mvn/version "0.7.1"}
+         meander/epsilon            {:mvn/version "0.0.650"}
+         reagent/reagent            {:mvn/version "1.1.0"}
          thheller/shadow-cljs       {:mvn/version "2.15.10"}}}
