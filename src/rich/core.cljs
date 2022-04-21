@@ -669,7 +669,9 @@
           marked-text       (text-nodes->marked-text sibling-nodes)
           delete-to-index   (case unit
                               :char (dec start-text-index) ; start-text-index > 0 as offset > 0
-                              :word (let [index (search-backwards marked-text (fn [[char _]] (= char " ")) start-text-index)]
+                              :word (let [index (search-backwards marked-text
+                                                                  (fn [[char _]] (= char " "))
+                                                                  (dec start-text-index))]
                                       (if (nil? index)
                                         0
                                         (inc index)))
