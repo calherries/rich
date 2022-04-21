@@ -9,11 +9,10 @@
 <br/>
 
 <p align="center">
+  <a href="#principles"><strong>Principles</strong></a> ·
   <a href="https://beautiful-haupia-5c51c7.netlify.app/"><strong>Demo</strong></a>
 </p>
 <br/>
-
-
 
 <p align="center">
   <a href="#"><img src="./docs/images/awesome-demo.gif" /></a> ·
@@ -21,11 +20,7 @@
 <br/>
 </p>
 
-## Warning:
-This project is in its early stages of development. 
-Do not use.
-
-# Principles
+### Principles
 
 - First-class plugins. The most important part of Slate is that plugins are first-class entities. That means you can completely customize the editing experience, to build complex editors like Medium's or Dropbox's, without having to fight against the library's assumptions.
 
@@ -40,3 +35,8 @@ Do not use.
 - Collaboration-ready data model. The data model Slate uses—specifically how operations are applied to the document—has been designed to allow for collaborative editing to be layered on top, so you won't need to rethink everything if you decide to make your editor collaborative.
 
 - Clear "core" boundaries. With a plugin-first architecture, and a schema-less core, it becomes a lot clearer where the boundary is between "core" and "custom", which means that the core experience doesn't get bogged down in edge cases.
+
+### Warning:
+
+This project is in its early stages of development. 
+Do not use.
