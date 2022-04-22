@@ -20,7 +20,7 @@
 <br/>
 </p>
 
-### Design
+## Design
 
 - Schema-less core. Rich's core logic assumes very little about the schema of the data you'll be editing, which means that there are no assumptions baked into the library that'll trip you up when you need to go beyond the most basic use cases.
 
@@ -34,7 +34,7 @@
 
 - Clear "core" boundaries. With a plugin-first architecture, and a schema-less core, it becomes a lot clearer where the boundary is between "core" and "custom", which means that the core experience doesn't get bogged down in edge cases.
 
-### Demo
+## Demo
 
 To get an idea of how you might use Rich, check out the [demo](https://beautiful-haupia-5c51c7.netlify.app/).
 
@@ -47,13 +47,13 @@ npm run build
 
 Then go to http://localhost:3447/ in your browser.
 
-### Features
+## Features
 
 - Deserialize text editor contents to HTML, JSON, EDN
 - Undo
 - Extensible commands
 
-### Roadmap
+## Roadmap
 
 - Full rich text demo
 - Compatibility with CRDTs for collaborative editing
