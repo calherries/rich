@@ -1,4 +1,4 @@
-{:paths ["src" "dev"]
+{:paths ["src" "dev" "examples"]
  :deps  {binaryage/devtools         {:mvn/version "1.0.3"}
          com.hyperfiddle/rcf        {:mvn/version "20220405"}
          com.lambdaisland/dom-types {:mvn/version "0.4.34"}
