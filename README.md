@@ -22,7 +22,7 @@
 
 ## Design goals
 
-- Nested document model. The document model used for Rich is a nested, recursive tree, just like the DOM itself. This means that creating complex components like tables or nested block quotes are possible for advanced use cases. But it's also easy to keep it simple by only using a single level of hierarchy.
+- Nested document model. The document model used for Rich is a nested, recursive tree, just like the DOM itself. The document tree adheres to the [hickory](https://github.com/davidsantiago/hickory) format to make converting to and from HTML easy. Because it's a tree and not a flat list of characters, creating complex components like tables or nested block quotes are possible for advanced use cases.
 
 - Flexible schemas. The nodes in Rich's document model are open maps, and the core assumes very little about the schema of the data you'll be editing. That means that there are no assumptions baked into the library that'll trip you up when you need to go beyond the most basic use cases.
 
@@ -45,7 +45,13 @@ npm install
 npm run build
 ```
 
-Then go to http://localhost:3447/ in your browser.
+## Examples
+
+To get started using Rich, it might help to start with an example.
+
+- [Plain text](https://github.com/calherries/rich/blob/master/examples/editors/plain_text.cljs) -- showing the most basic case: a glorified `<textarea>`
+- [Rich text](https://github.com/calherries/rich/blob/master/examples/editors/rich_text.cljs) -- showing the features you'd most likely expect from an editor.
+- More to come...
 
 ## Features
 
