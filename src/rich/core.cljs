@@ -693,7 +693,7 @@
 (tests
  "Deleting at the start of a block should merge text nodes together"
  (let [state initial-state
-       intents [[:set-selection
+       commands [[:set-selection
                  {:anchor {:path [0 0], :offset 9}, :focus {:path [0 0], :offset 9}}]
                 [:set-selection
                  {:anchor {:path [0 0], :offset 5},
@@ -703,7 +703,7 @@
                  {:anchor {:path [0 1], :offset 4}, :focus {:path [0 1], :offset 4}}]
                 [:insert-paragraph]
                 [:delete-content-backward]]]
-   (redo state intents))
+   (do-commands state commands))
  := {:anchor {:offset 4, :path [0 1]},
      :content
      {:attrs {},
@@ -721,15 +721,15 @@
       :tag :div,
       :type :element},
      :focus {:offset 4, :path [0 1]},
-     :history [[:set-selection
-                {:anchor {:offset 9, :path [0 0]}, :focus {:offset 9, :path [0 0]}}]
-               [:set-selection
-                {:anchor {:offset 5, :path [0 0]},
-                 :focus {:offset 14, :path [0 0]}}]
-               [:selection-toggle-attribute [:style :font-weight] "bold"]
-               [:set-selection
-                {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]
-               [:insert-paragraph] [:delete-content-backward]]})
+     :command-history [[:set-selection
+                       {:anchor {:offset 9, :path [0 0]}, :focus {:offset 9, :path [0 0]}}]
+                      [:set-selection
+                       {:anchor {:offset 5, :path [0 0]},
+                        :focus {:offset 14, :path [0 0]}}]
+                      [:selection-toggle-attribute [:style :font-weight] "bold"]
+                      [:set-selection
+                       {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]
+                      [:insert-paragraph] [:delete-content-backward]]})
 
 (defn selection?
   "Returns true if there is a selection of text."
@@ -801,13 +801,13 @@
 
 (tests
  "Select a word and make it bold"
- (let [intents [[:set-selection
+ (let [commands [[:set-selection
                  {:anchor {:path [0 0], :offset 8}, :focus {:path [0 0], :offset 8}}]
                 [:set-selection
                  {:anchor {:path [0 0], :offset 5},
                   :focus {:path [0 0], :offset 14}}]
                 [:selection-toggle-attribute [:style :font-weight] "bold"]]
-       state (redo initial-state intents)]
+       state (do-commands initial-state commands)]
    state)
  := {:anchor {:offset 0, :path [0 1]},
      :content
@@ -826,12 +826,12 @@
       :tag :div,
       :type :element},
      :focus {:offset 0, :path [0 2]},
-     :history [[:set-selection
-                {:anchor {:offset 8, :path [0 0]}, :focus {:offset 8, :path [0 0]}}]
-               [:set-selection
-                {:anchor {:offset 5, :path [0 0]},
-                 :focus {:offset 14, :path [0 0]}}]
-               [:selection-toggle-attribute [:style :font-weight] "bold"]]})
+     :command-history [[:set-selection
+                       {:anchor {:offset 8, :path [0 0]}, :focus {:offset 8, :path [0 0]}}]
+                      [:set-selection
+                       {:anchor {:offset 5, :path [0 0]},
+                        :focus {:offset 14, :path [0 0]}}]
+                      [:selection-toggle-attribute [:style :font-weight] "bold"]]})
 
 (defn insert-marked-text
   "Inserts this marked text at the current cursor."
@@ -870,11 +870,11 @@
 
 (tests
  "Insert text after making the cursor bold"
- (let [intents [[:set-selection
+ (let [commands [[:set-selection
                  {:anchor {:path [0 0], :offset 15},
                   :focus {:path [0 0], :offset 15}}]
                 [:selection-toggle-attribute [:style :font-weight] "bold"]]
-       state (redo initial-state intents)
+       state (do-commands initial-state commands)
        marked-text [["b" {:style {:font-weight "bold"}}]]]
    state
    (insert-marked-text state marked-text))
@@ -896,10 +896,10 @@
       :tag :div,
       :type :element},
      :focus {:offset 1, :path [0 1]},
-     :history [[:set-selection
-                {:anchor {:offset 15, :path [0 0]},
-                 :focus {:offset 15, :path [0 0]}}]
-               [:selection-toggle-attribute [:style :font-weight] "bold"]]})
+     :command-history [[:set-selection
+                       {:anchor {:offset 15, :path [0 0]},
+                        :focus {:offset 15, :path [0 0]}}]
+                      [:selection-toggle-attribute [:style :font-weight] "bold"]]})
 
 (defn things-in-both
   "Recursively diffs a and b to find the common values. Maps are subdiffed where keys match and values differ."
@@ -972,8 +972,8 @@
              :tag     :div,
              :type    :element}})
 
-(defmulti intent-handler (fn [_state intent-v]
-                           (first intent-v)))
+(defmulti command-handler (fn [_state command-v]
+                           (first command-v)))
 
 ;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
 (defn selection-toggle-attribute
@@ -1010,13 +1010,13 @@
 
 (tests
  "Set two active attributes under the cursor and start typing"
- (let [intents [[:set-selection
+ (let [commands [[:set-selection
                  {:anchor {:path [0 0], :offset 15},
                   :focus {:path [0 0], :offset 15}}]
                 [:selection-toggle-attribute [:style :font-weight] "bold"]
                 [:selection-toggle-attribute [:style :font-style] "italic"]
                 [:insert-text "b"]]
-       state (redo initial-state intents)]
+       state (do-commands initial-state commands)]
    state)
  := {:anchor {:offset 1, :path [0 1]},
      :content
@@ -1035,14 +1035,28 @@
       :tag :div,
       :type :element},
      :focus {:offset 1, :path [0 1]},
-     :history [[:set-selection
-                {:anchor {:offset 15, :path [0 0]},
-                 :focus {:offset 15, :path [0 0]}}]
-               [:selection-toggle-attribute [:style :font-weight] "bold"]
-               [:selection-toggle-attribute [:style :font-style] "italic"]
-               [:insert-text "b"]]})
+     :command-history [[:set-selection
+                       {:anchor {:offset 15, :path [0 0]},
+                        :focus {:offset 15, :path [0 0]}}]
+                      [:selection-toggle-attribute [:style :font-weight] "bold"]
+                      [:selection-toggle-attribute [:style :font-style] "italic"]
+                      [:insert-text "b"]]})
 
-(defmethod intent-handler :selection-toggle-attribute
+(def do-command
+  (fn [state command-v]
+    (-> state
+        (update :command-history conj command-v)
+        (update :history conj (select-keys state [:content :anchor :focus]))
+        (command-handler command-v))))
+
+(defn do-commands
+  "Decodes a list of commands, executing them on this state"
+  [state commands]
+  (reduce do-command
+          state
+          commands))
+
+(defmethod command-handler :selection-toggle-attribute
   [state [_ attr-path value]]
   (selection-toggle-attribute state attr-path value))
 
@@ -1056,7 +1070,7 @@
       (update-in [:anchor :offset] + (count text))
       (update-in [:focus :offset] + (count text))))
 
-(defmethod intent-handler :paste
+(defmethod command-handler :paste
   [state [_ text]]
   (paste state text))
 
@@ -1079,7 +1093,7 @@
           (update-in [:anchor :offset] + (count text))
           (update-in [:focus :offset] + (count text))))))
 
-(defmethod intent-handler :insert-text
+(defmethod command-handler :insert-text
   [state [_ text]]
   (insert-text state text))
 
@@ -1135,7 +1149,7 @@
                :tag :div,
                :type :element},
               :focus {:offset 4, :path [0 1]},
-              :history
+              :command-history
               [[:set-selection
                 {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
                [:selection-toggle-attribute [:style :font-weight] "bold"]
@@ -1166,7 +1180,7 @@
       :tag :div,
       :type :element},
      :focus {:offset 0, :path [1 0]},
-     :history
+     :command-history
      [[:set-selection
        {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
       [:selection-toggle-attribute [:style :font-weight] "bold"]
@@ -1179,7 +1193,7 @@
       (delete-selection)
       (insert-paragraph-at-selection-start)))
 
-(defmethod intent-handler :insert-paragraph
+(defmethod command-handler :insert-paragraph
   [state [_]]
   (insert-paragraph state))
 
@@ -1190,40 +1204,27 @@
                              :path   (get-in state [:focus :path])
                              :offset (get-in state [:focus :offset])})))
 
-(defmethod intent-handler :delete-content-backward
+(defmethod command-handler :delete-content-backward
   [state [_]]
   (delete-content-backward state :char))
 
-(defmethod intent-handler :delete-soft-line-backward
+(defmethod command-handler :delete-soft-line-backward
   [state [_]]
   (delete-content-backward state :line))
 
-(defmethod intent-handler :delete-word-backward
+(defmethod command-handler :delete-word-backward
   [state [_]]
   (delete-content-backward state :word))
 
 (defn set-selection [state selection]
   (merge state selection))
 
-(defmethod intent-handler :set-selection
+(defmethod command-handler :set-selection
   [state [_ selection]]
   (set-selection state selection))
 
 (def state
   (r/atom initial-state))
-
-(def wrapped-intent-handler
-  (fn [state intent-v]
-    (-> state
-        (update :history (fnil conj []) intent-v)
-        (intent-handler intent-v))))
-
-(defn redo
-  "Decodes a list of intents, executing them on this state"
-  [state intents]
-  (reduce wrapped-intent-handler
-          state
-          intents))
 
 ;;;;;;;;
 ;; DOM
@@ -1315,7 +1316,7 @@
                                                  (swap! state dissoc :active-attrs :remove-attrs))
                                                (when-let [selection (get-selection)]
                                                  (when (not= selection (select-keys @state [:anchor :focus]))
-                                                   (swap! state wrapped-intent-handler [:set-selection selection]))))
+                                                   (swap! state do-command [:set-selection selection]))))
                                              100)
         debounced-selection-change (debounce on-selection-change 0)
         on-before-input            (fn [e]
@@ -1334,15 +1335,15 @@
                                               input-type (.-inputType e)]
                                           (case input-type
                                             "insertText"
-                                            (wrapped-intent-handler state [:insert-text data])
+                                            (do-command state [:insert-text data])
                                             "insertParagraph"
-                                            (wrapped-intent-handler state [:insert-paragraph])
+                                            (do-command state [:insert-paragraph])
                                             "deleteContentBackward"
-                                            (wrapped-intent-handler state [:delete-content-backward])
+                                            (do-command state [:delete-content-backward])
                                             "deleteSoftLineBackward"
-                                            (wrapped-intent-handler state [:delete-soft-line-backward])
+                                            (do-command state [:delete-soft-line-backward])
                                             "deleteWordBackward"
-                                            (wrapped-intent-handler state [:delete-word-backward]))))))]
+                                            (do-command state [:delete-word-backward]))))))]
     (r/create-class
      {:component-did-mount
       (fn [this]
@@ -1384,17 +1385,20 @@
             :on-key-down                       (fn [e]
                                                  (when (and (= (.-key e) "b") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :font-weight] "bold"]))
+                                                   (swap! state do-command [:selection-toggle-attribute [:style :font-weight] "bold"]))
                                                  (when (and (= (.-key e) "i") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :font-style] "italic"]))
+                                                   (swap! state do-command [:selection-toggle-attribute [:style :font-style] "italic"]))
                                                  (when (and (= (.-key e) "u") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :text-decoration] "underline"])))
+                                                   (swap! state do-command [:selection-toggle-attribute [:style :text-decoration] "underline"]))
+                                                 (when (and (= (.-key e) "z") (.-metaKey e))
+                                                   (.preventDefault e)
+                                                   (swap! state do-command [:undo])))
             :on-paste                          (fn [e]
                                                  (.preventDefault e)
                                                  (let [text (-> e .-clipboardData (.getData "Text"))]
-                                                   (swap! state wrapped-intent-handler [:paste text])))}
+                                                   (swap! state do-command [:paste text])))}
            (-> content
                editable-hickory
                minimized-hickory
