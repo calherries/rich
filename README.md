@@ -51,11 +51,12 @@ Then go to http://localhost:3447/ in your browser.
 
 - Deserialize text editor contents to HTML, JSON, EDN
 - Undo
-- Extensible commands
+- Extensible command pallette
 
 ## Roadmap
 
-- Full rich text demo
+- Full rich text demo with reagent, including toolbars and multiple editors
+- Proven compatibility with different frontend frameworks, outside React
 - Compatibility with CRDTs for collaborative editing
 - Markdown editor demo
 - Customizable toolbars
