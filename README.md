@@ -51,7 +51,7 @@ Then go to http://localhost:3447/ in your browser.
 
 - Deserialize text editor state to JSON, EDN, and its contents to HTML
 - Undo
-- Extensible command pallette
+- Extensible command pallette, using multimethods
 
 ## Roadmap
 
