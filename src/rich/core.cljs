@@ -1387,7 +1387,10 @@
                                                    (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :font-weight] "bold"]))
                                                  (when (and (= (.-key e) "i") (.-metaKey e))
                                                    (.preventDefault e)
-                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :font-style] "italic"])))
+                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :font-style] "italic"]))
+                                                 (when (and (= (.-key e) "u") (.-metaKey e))
+                                                   (.preventDefault e)
+                                                   (swap! state wrapped-intent-handler [:selection-toggle-attribute [:style :text-decoration] "underline"])))
             :on-paste                          (fn [e]
                                                  (.preventDefault e)
                                                  (let [text (-> e .-clipboardData (.getData "Text"))]
