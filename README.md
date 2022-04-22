@@ -22,7 +22,7 @@
 
 ## Design
 
-- Schema-less core. Rich's core logic assumes very little about the schema of the data you'll be editing, which means that there are no assumptions baked into the library that'll trip you up when you need to go beyond the most basic use cases.
+- Flexible schemas. Rich's core data structures are open Clojure maps and vectors, and the core assumes very little about the schema of the data you'll be editing. That means that there are no assumptions baked into the library that'll trip you up when you need to go beyond the most basic use cases.
 
 - Nested document model. The document model used for Rich is a nested, recursive tree, just like the DOM itself. This means that creating complex components like tables or nested block quotes are possible for advanced use cases. But it's also easy to keep it simple by only using a single level of hierarchy.
 
