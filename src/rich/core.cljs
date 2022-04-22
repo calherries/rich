@@ -1056,6 +1056,15 @@
           state
           commands))
 
+(defn undo [state]
+  (-> state
+      (merge (second (:history state)))
+      (update :history (comp rest rest))))
+
+(defmethod command-handler :undo
+  [state [_]]
+  (undo state))
+
 (defmethod command-handler :selection-toggle-attribute
   [state [_ attr-path value]]
   (selection-toggle-attribute state attr-path value))
