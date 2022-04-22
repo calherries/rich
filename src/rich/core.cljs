@@ -10,14 +10,6 @@
             [reagent.dom :as rdom]))
 
 ;;;;;;;;;;;;;;;;
-;; GENERAL UTILS
-
-(defn p [x]
-  (def x x)
-  (js/console.log x)
-  x)
-
-;;;;;;;;;;;;;;;;
 ;; SEQ
 
 (defn take-until
@@ -987,7 +979,6 @@
 (defmulti command-handler (fn [_state command-v]
                            (first command-v)))
 
-;; FIXME: :active-attrs and :remove-attrs should be replaced with a more precise abstraction
 (defn selection-toggle-attribute
   "Toggles an attribute in the selection."
   [state attr-path value]
