@@ -55,6 +55,7 @@ Then go to http://localhost:3447/ in your browser.
 
 ## Roadmap
 
+- Paste with or without formatting
 - Full rich text demo with reagent, including toolbars and multiple editors
 - Proven compatibility with different frontend frameworks, outside React
 - Compatibility with CRDTs for collaborative editing
