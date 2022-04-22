@@ -9,7 +9,7 @@
 <br/>
 
 <p align="center">
-  <a href="#design"><strong>Design</strong></a> ·
+  <a href="#design"><strong>Design goals</strong></a> ·
   <a href="https://beautiful-haupia-5c51c7.netlify.app/"><strong>Demo</strong></a>
 </p>
 <br/>
@@ -20,7 +20,7 @@
 <br/>
 </p>
 
-## Design
+## Design goals
 
 - Flexible schemas. Rich's core data structures are open Clojure maps and vectors, and the core assumes very little about the schema of the data you'll be editing. That means that there are no assumptions baked into the library that'll trip you up when you need to go beyond the most basic use cases.
 
