@@ -9,7 +9,7 @@
 <br/>
 
 <p align="center">
-  <a href="#principles"><strong>Principles</strong></a> ·
+  <a href="#design"><strong>Design</strong></a> ·
   <a href="https://beautiful-haupia-5c51c7.netlify.app/"><strong>Demo</strong></a>
 </p>
 <br/>
@@ -20,7 +20,7 @@
 <br/>
 </p>
 
-### Principles
+### Design
 
 - Schema-less core. Rich's core logic assumes very little about the schema of the data you'll be editing, which means that there are no assumptions baked into the library that'll trip you up when you need to go beyond the most basic use cases.
 
@@ -34,3 +34,28 @@
 
 - Clear "core" boundaries. With a plugin-first architecture, and a schema-less core, it becomes a lot clearer where the boundary is between "core" and "custom", which means that the core experience doesn't get bogged down in edge cases.
 
+### Demo
+
+To get an idea of how you might use Rich, check out the [demo](https://beautiful-haupia-5c51c7.netlify.app/).
+
+To run the demo site yourself, clone this repo and run:
+
+```
+npm install
+npm run build
+```
+
+Then go to http://localhost:3447/ in your browser.
+
+### Features
+
+- Deserialize text editor contents to HTML, JSON, EDN
+- Undo
+- Extensible commands
+
+### Roadmap
+
+- Full rich text demo
+- Compatibility with CRDTs for collaborative editing
+- Markdown editor demo
+- Customizable toolbars
