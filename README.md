@@ -50,8 +50,8 @@ Then go to http://localhost:3447/ in your browser.
 ## Features
 
 - Deserialize text editor state to JSON, EDN, and its contents to HTML
-- Undo
-- Extensible command pallette, using multimethods
+- Undoable state
+- Extensible command pallette
 
 ## Roadmap
 
