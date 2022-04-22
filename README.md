@@ -49,7 +49,7 @@ Then go to http://localhost:3447/ in your browser.
 
 ## Features
 
-- Deserialize text editor contents to HTML, JSON, EDN
+- Deserialize text editor state to JSON, EDN, and its contents to HTML
 - Undo
 - Extensible command pallette
 
