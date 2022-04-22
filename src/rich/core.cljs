@@ -692,7 +692,7 @@
 
 (tests
  "Deleting at the start of a block should merge text nodes together"
- (let [state initial-state
+ (let [state initial-test-state
        commands [[:set-selection
                  {:anchor {:path [0 0], :offset 9}, :focus {:path [0 0], :offset 9}}]
                 [:set-selection
@@ -807,7 +807,7 @@
                  {:anchor {:path [0 0], :offset 5},
                   :focus {:path [0 0], :offset 14}}]
                 [:selection-toggle-attribute [:style :font-weight] "bold"]]
-       state (do-commands initial-state commands)]
+       state (do-commands initial-test-state commands)]
    state)
  := {:anchor {:offset 0, :path [0 1]},
      :content
@@ -874,7 +874,7 @@
                  {:anchor {:path [0 0], :offset 15},
                   :focus {:path [0 0], :offset 15}}]
                 [:selection-toggle-attribute [:style :font-weight] "bold"]]
-       state (do-commands initial-state commands)
+       state (do-commands initial-test-state commands)
        marked-text [["b" {:style {:font-weight "bold"}}]]]
    state
    (insert-marked-text state marked-text))
@@ -960,7 +960,19 @@
 ;;;;;;;;;;;;;;;;;;;;;
 ;; EDITABLE COMPONENT
 
-(def initial-state
+(def default-initial-state
+  {:content {:attrs   {},
+             :content [{:tag     :div
+                        :type    :element
+                        :attrs   {}
+                        :content [{:attrs   {}
+                                   :content [""],
+                                   :tag     :span,
+                                   :type    :element}]}],
+             :tag     :div,
+             :type    :element}})
+
+(def initial-test-state
   {:content {:attrs   {},
              :content [{:tag     :div
                         :type    :element
@@ -1016,7 +1028,7 @@
                 [:selection-toggle-attribute [:style :font-weight] "bold"]
                 [:selection-toggle-attribute [:style :font-style] "italic"]
                 [:insert-text "b"]]
-       state (do-commands initial-state commands)]
+       state (do-commands initial-test-state commands)]
    state)
  := {:anchor {:offset 1, :path [0 1]},
      :content
@@ -1232,9 +1244,6 @@
   [state [_ selection]]
   (set-selection state selection))
 
-(def state
-  (r/atom initial-state))
-
 ;;;;;;;;
 ;; DOM
 
@@ -1277,11 +1286,6 @@
   [element]
   (.closest element "[data-rich-root]"))
 
-(defn editable-element?
-  "Returns true if this element is a node element of the editable component."
-  [element]
-  (.hasAttribute element "data-rich-node"))
-
 (defn root-element?
   "Returns true if element is the root of the editable component's content"
   [element]
@@ -1318,7 +1322,11 @@
                           (.-focusOffset selection))}})))
 
 (defn editable
-  []
+  [{:keys [state
+           on-key-down
+           on-paste]}]
+  (when (nil? @state)
+    (reset! state default-initial-state))
   (let [on-selection-change        (throttle (fn []
                                                (when (or (:active-attrs @state)
                                                          (:remove-attrs @state))
@@ -1382,34 +1390,19 @@
                                  (.-endOffset dom-range))))))
       :reagent-render
       (fn []
-        (let [content (:content @state)]
-          [:div
-           {:id                                "rich-editable"
-            :content-editable                  true
-            :suppress-content-editable-warning true
-            :style                             {:width         "100%"
-                                                :height        "100%"
-                                                :white-space   "pre-wrap"
-                                                :overflow-wrap "break-word"}
-            :on-key-down                       (fn [e]
-                                                 (when (and (= (.-key e) "b") (.-metaKey e))
-                                                   (.preventDefault e)
-                                                   (swap! state do-command [:selection-toggle-attribute [:style :font-weight] "bold"]))
-                                                 (when (and (= (.-key e) "i") (.-metaKey e))
-                                                   (.preventDefault e)
-                                                   (swap! state do-command [:selection-toggle-attribute [:style :font-style] "italic"]))
-                                                 (when (and (= (.-key e) "u") (.-metaKey e))
-                                                   (.preventDefault e)
-                                                   (swap! state do-command [:selection-toggle-attribute [:style :text-decoration] "underline"]))
-                                                 (when (and (= (.-key e) "z") (.-metaKey e))
-                                                   (.preventDefault e)
-                                                   (swap! state do-command [:undo])))
-            :on-paste                          (fn [e]
-                                                 (.preventDefault e)
-                                                 (let [text (-> e .-clipboardData (.getData "Text"))]
-                                                   (swap! state do-command [:paste text])))}
-           (-> content
-               editable-hickory
-               minimized-hickory
-               browser-compatible-hickory
-               hickory->hiccup)]))})))
+        [:div
+         {:id                                "rich-editable"
+          :content-editable                  true
+          :suppress-content-editable-warning true
+          :style                             {:width         "100%"
+                                              :height        "100%"
+                                              :white-space   "pre-wrap"
+                                              :overflow-wrap "break-word"}
+          :on-key-down                       on-key-down
+          :on-paste                          on-paste}
+         (-> @state
+             :content
+             editable-hickory
+             minimized-hickory
+             browser-compatible-hickory
+             hickory->hiccup)])})))

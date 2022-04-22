@@ -5,8 +5,7 @@
             [reagent.dom :as rdom]))
 
 (defn root []
-  [:div
-   [editors.rich-text/editor]])
+  [editors.rich-text/rich-text-example])
 
 ; Enable tests after app namespaces are loaded (intended for subsequent REPL interactions)
 (set! hyperfiddle.rcf/*enabled* true)
@@ -18,7 +17,6 @@
   (rdom/render [root] (js/document.getElementById "app")))
 
 (defn ^:dev/before-load stop []
-  (remove-watch rich/state :state-logger)
   (set! hyperfiddle.rcf/*enabled* false))
 
 (defn ^:export init []
