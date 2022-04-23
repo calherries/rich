@@ -1,5 +1,6 @@
 (ns rich.core
   (:require [clojure.data :as data]
+            [lambdaisland.deep-diff2 :as deep-diff]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.zip :as zip]
@@ -458,8 +459,7 @@
  := [{:attrs {:attrs {:style {:font-weight "bold"}}},
       :content [""],
       :tag :span,
-      :type :element}]
- )
+      :type :element}])
 
 ;; The following two functions map a point in a vector of text nodes
 ;; to an index in an array of characters, and vice versa.
@@ -473,8 +473,9 @@
 (defn node-index-and-offset->text-index [text-nodes {:keys [node-index node-offset]}]
   (let [cumulative-offsets   (reductions + 0 (map (fn [node] (count (text-node->text node))) text-nodes))
         start-offset-of-node (nth cumulative-offsets node-index)
-        node-side-of-index   (if (= (count (text-node->text (nth text-nodes node-index)))
-                                    node-offset)
+        node-side-of-index   (if (and (< 0 node-offset)
+                                      (= (count (text-node->text (nth text-nodes node-index)))
+                                         node-offset))
                                :left ; left is the exception. It's only to the left if the node-offset is equal to the count of characters in the node, i.e. the cursor is at the end of the node.
                                :right)]
     {:text-index         (+ start-offset-of-node
@@ -499,6 +500,14 @@
                      start-offset-of-node)}))
 
 (tests
+ (node-index-and-offset->text-index [{:attrs {},
+                                      :content [""],
+                                      :tag :span,
+                                      :type :element}]
+                                    {:node-index 0, :node-offset 0})
+ :=
+ {:node-side-of-index :right, :text-index 0}
+
  (def text-nodes [{:attrs {}, :content ["Type "], :tag :span, :type :element}
                   {:attrs {:style {:font-weight "bold"}},
                    :content ["something"],
@@ -595,8 +604,8 @@
  (mapv zip/node (leaf-zips-between example-zip [1 1 0] [1 2])) := [0 1 3]
  (paths-between example-zip [1 1 0] [1 2]) := '([1 1 0] [1 1 1] [1 2])
  (path-to-zip (first (branch-zips-between example-zip [1 0] [1 2])))
- (branch-paths-between example-zip [1 0] [1 2])
- )
+ (branch-paths-between example-zip [1 0] [1 2]))
+
 
 
 ;;;;;;;;;;;;;;;;;;
@@ -735,16 +744,17 @@
  "Deleting at the start of a block should merge text nodes together"
  (let [state initial-test-state
        commands [[:set-selection
-                 {:anchor {:path [0 0], :offset 9}, :focus {:path [0 0], :offset 9}}]
-                [:set-selection
-                 {:anchor {:path [0 0], :offset 5},
-                  :focus {:path [0 0], :offset 14}}]
-                [:selection-toggle-attribute [:style :font-weight] "bold"]
-                [:set-selection
-                 {:anchor {:path [0 1], :offset 4}, :focus {:path [0 1], :offset 4}}]
-                [:insert-paragraph]
-                [:delete-content-backward]]]
-   (do-commands state commands))
+                  {:anchor {:path [0 0], :offset 9}, :focus {:path [0 0], :offset 9}}]
+                 [:set-selection
+                  {:anchor {:path [0 0], :offset 5},
+                   :focus {:path [0 0], :offset 14}}]
+                 [:selection-toggle-attribute [:style :font-weight] "bold"]
+                 [:set-selection
+                  {:anchor {:path [0 1], :offset 4}, :focus {:path [0 1], :offset 4}}]
+                 [:insert-paragraph]
+                 [:delete-content-backward]]]
+   (-> (do-commands state commands)
+       (select-keys [:anchor :content :focus])))
  := {:anchor {:offset 4, :path [0 1]},
      :content
      {:attrs {},
@@ -761,16 +771,7 @@
         :type :element}],
       :tag :div,
       :type :element},
-     :focus {:offset 4, :path [0 1]},
-     :command-history [[:set-selection
-                       {:anchor {:offset 9, :path [0 0]}, :focus {:offset 9, :path [0 0]}}]
-                      [:set-selection
-                       {:anchor {:offset 5, :path [0 0]},
-                        :focus {:offset 14, :path [0 0]}}]
-                      [:selection-toggle-attribute [:style :font-weight] "bold"]
-                      [:set-selection
-                       {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]
-                      [:insert-paragraph] [:delete-content-backward]]})
+     :focus {:offset 4, :path [0 1]}})
 
 (defn selection?
   "Returns true if there is a selection of text."
@@ -816,8 +817,8 @@
         end-index           (last (:path end-point))
         start-text-offset   (node-index-and-offset->text-index start-sibling-nodes {:node-index  start-index
                                                                                     :node-offset (:offset start-point)})
-        end-text-offset     (node-index-and-offset->text-index end-sibling-nodes {:node-index  end-index
-                                                                                  :node-offset (:offset end-point)})]
+        end-text-offset     (node-index-and-offset->text-index (p end-sibling-nodes) (q {:node-index  end-index
+                                                                                         :node-offset (:offset end-point)}))]
     (if (= end-parent-path start-parent-path)
       (let [new-sibling-nodes   (update-text-nodes start-sibling-nodes
                                                    update-fn
@@ -840,6 +841,7 @@
         (merge state {:content new-content
                       :anchor  anchor
                       :focus   focus}))
+      ;; start and end nodes have different parents
       (let [new-start-sibling-nodes (update-text-nodes start-sibling-nodes
                                                        update-fn
                                                        (:text-index start-text-offset))
@@ -883,13 +885,13 @@
 (tests
  "Select a word and make it bold"
  (let [commands [[:set-selection
-                 {:anchor {:path [0 0], :offset 8}, :focus {:path [0 0], :offset 8}}]
-                [:set-selection
-                 {:anchor {:path [0 0], :offset 5},
-                  :focus {:path [0 0], :offset 14}}]
-                [:selection-toggle-attribute [:style :font-weight] "bold"]]
+                  {:anchor {:path [0 0], :offset 8}, :focus {:path [0 0], :offset 8}}]
+                 [:set-selection
+                  {:anchor {:path [0 0], :offset 5},
+                   :focus {:path [0 0], :offset 14}}]
+                 [:selection-toggle-attribute [:style :font-weight] "bold"]]
        state (do-commands initial-test-state commands)]
-   state)
+   (select-keys state [:anchor :content :focus]))
  := {:anchor {:offset 0, :path [0 1]},
      :content
      {:attrs {},
@@ -906,13 +908,7 @@
         :type :element}],
       :tag :div,
       :type :element},
-     :focus {:offset 0, :path [0 2]},
-     :command-history [[:set-selection
-                       {:anchor {:offset 8, :path [0 0]}, :focus {:offset 8, :path [0 0]}}]
-                      [:set-selection
-                       {:anchor {:offset 5, :path [0 0]},
-                        :focus {:offset 14, :path [0 0]}}]
-                      [:selection-toggle-attribute [:style :font-weight] "bold"]]})
+     :focus {:offset 0, :path [0 2]}})
 
 (defn insert-marked-text
   "Inserts this marked text at the current cursor."
@@ -952,15 +948,14 @@
 (tests
  "Insert text after making the cursor bold"
  (let [commands [[:set-selection
-                 {:anchor {:path [0 0], :offset 15},
-                  :focus {:path [0 0], :offset 15}}]
-                [:selection-toggle-attribute [:style :font-weight] "bold"]]
+                  {:anchor {:path [0 0], :offset 15},
+                   :focus {:path [0 0], :offset 15}}]
+                 [:selection-toggle-attribute [:style :font-weight] "bold"]]
        state (do-commands initial-test-state commands)
        marked-text [["b" {:style {:font-weight "bold"}}]]]
-   state
-   (insert-marked-text state marked-text))
- := {:active-attrs {:style {:font-weight "bold"}},
-     :anchor {:offset 1, :path [0 1]},
+   (-> (insert-marked-text state marked-text)
+       (select-keys [:anchor :content :focus])))
+ := {:anchor {:offset 1, :path [0 1]},
      :content
      {:attrs {},
       :content
@@ -976,11 +971,7 @@
         :type :element}],
       :tag :div,
       :type :element},
-     :focus {:offset 1, :path [0 1]},
-     :command-history [[:set-selection
-                       {:anchor {:offset 15, :path [0 0]},
-                        :focus {:offset 15, :path [0 0]}}]
-                      [:selection-toggle-attribute [:style :font-weight] "bold"]]})
+     :focus {:offset 1, :path [0 1]}})
 
 (defn things-in-both
   "Recursively diffs a and b to find the common values. Maps are subdiffed where keys match and values differ."
@@ -1103,13 +1094,13 @@
 (tests
  "Set two active attributes under the cursor and start typing"
  (let [commands [[:set-selection
-                 {:anchor {:path [0 0], :offset 15},
-                  :focus {:path [0 0], :offset 15}}]
-                [:selection-toggle-attribute [:style :font-weight] "bold"]
-                [:selection-toggle-attribute [:style :font-style] "italic"]
-                [:insert-text "b"]]
+                  {:anchor {:path [0 0], :offset 15},
+                   :focus {:path [0 0], :offset 15}}]
+                 [:selection-toggle-attribute [:style :font-weight] "bold"]
+                 [:selection-toggle-attribute [:style :font-style] "italic"]
+                 [:insert-text "b"]]
        state (do-commands initial-test-state commands)]
-   state)
+   (select-keys state [:anchor :content :focus]))
  := {:anchor {:offset 1, :path [0 1]},
      :content
      {:attrs {},
@@ -1126,13 +1117,7 @@
         :type :element}],
       :tag :div,
       :type :element},
-     :focus {:offset 1, :path [0 1]},
-     :command-history [[:set-selection
-                       {:anchor {:offset 15, :path [0 0]},
-                        :focus {:offset 15, :path [0 0]}}]
-                      [:selection-toggle-attribute [:style :font-weight] "bold"]
-                      [:selection-toggle-attribute [:style :font-style] "italic"]
-                      [:insert-text "b"]]})
+     :focus {:offset 1, :path [0 1]}})
 
 (def do-command
   (fn [state command-v]
@@ -1249,13 +1234,7 @@
                  :type :element}],
                :tag :div,
                :type :element},
-              :focus {:offset 4, :path [0 1]},
-              :command-history
-              [[:set-selection
-                {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
-               [:selection-toggle-attribute [:style :font-weight] "bold"]
-               [:set-selection
-                {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]}]
+              :focus {:offset 4, :path [0 1]}}]
    (insert-paragraph-at-selection-start state))
  := {:anchor {:offset 0, :path [1 0]},
      :content
@@ -1280,13 +1259,7 @@
         :type :element}],
       :tag :div,
       :type :element},
-     :focus {:offset 0, :path [1 0]},
-     :command-history
-     [[:set-selection
-       {:anchor {:offset 5, :path [0 0]}, :focus {:offset 14, :path [0 0]}}]
-      [:selection-toggle-attribute [:style :font-weight] "bold"]
-      [:set-selection
-       {:anchor {:offset 4, :path [0 1]}, :focus {:offset 4, :path [0 1]}}]]})
+     :focus {:offset 0, :path [1 0]}})
 
 (defn insert-paragraph
   [state]
