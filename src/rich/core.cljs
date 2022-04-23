@@ -44,20 +44,23 @@
 (defn update-subvec
   "Updates the subvector with this function.
    Flattens the results back into the original vector"
-  [v start end f]
-  (-> (subvec v 0 start)
-      (into (f (subvec v start end)))
-      (into (subvec v end))))
+  [v f start end]
+  (let [end (if (nil? end)
+              (count v)
+              end)]
+    (-> (subvec v 0 start)
+        (into (f (subvec v start end)))
+        (into (subvec v end)))))
 
 (defn replace-subvec
   "Replaces this subvector with another subvector."
   [v start end xs]
-  (update-subvec v start end (fn [] xs)))
+  (update-subvec v (fn [] xs) start end))
 
 (defn remove-subvec
   "Removes this subvector."
   [v start end]
-  (update-subvec v start end (fn [] [])))
+  (update-subvec v (fn [] []) start end))
 
 (tests
  (update-subvec [0 1 2 3] 1 3 (fn [xs] (map #(* 100 %) xs)))
@@ -427,6 +430,22 @@
           [char (f attrs)])
         marked-text))
 
+(defn update-text-nodes
+  "Updates this vector of text nodes with this function.
+   Can work on a subvector of the characters in the text, if start and end indices are provided."
+  ([text-nodes update-fn]
+   (update-text-nodes text-nodes update-fn 0 nil))
+  ([text-nodes update-fn start-text-offset]
+   (update-text-nodes text-nodes update-fn start-text-offset nil))
+  ([text-nodes update-fn start-text-offset end-text-offset]
+   (-> text-nodes
+       (text-nodes->marked-text)
+       (update-subvec (fn [marked-text]
+                        (update-marked-text-attrs marked-text update-fn))
+                      start-text-offset
+                      end-text-offset)
+       (marked-text->text-nodes))))
+
 ;; The following two functions map a point in a vector of text nodes
 ;; to an index in an array of characters, and vice versa.
 ;;
@@ -755,41 +774,70 @@
 (defn update-selection-attrs
   "Updates all the text in the current selected range with this function."
   [state update-fn]
-  (let [content           (:content state)
+  (let [content             (:content state)
         {:keys [start-point end-point]} (range-from-selection state)
-        parent-path       (vec (butlast (:path start-point)))
-        parent-node       (hickory-get-in content parent-path)
-        sibling-nodes     (:content parent-node)
-        start-index       (last (:path start-point))
-        end-index         (last (:path end-point))
-        start-text-offset (node-index-and-offset->text-index sibling-nodes {:node-index  start-index
-                                                                            :node-offset (:offset start-point)})
-        end-text-offset   (node-index-and-offset->text-index sibling-nodes {:node-index  end-index
-                                                                            :node-offset (:offset end-point)})
-        new-sibling-nodes (-> sibling-nodes
-                              (text-nodes->marked-text)
-                              (update-subvec (:text-index start-text-offset)
-                                             (:text-index end-text-offset)
-                                             (fn [marked-text]
-                                               (update-marked-text-attrs marked-text update-fn)))
-                              (marked-text->text-nodes))
-        {new-start-index  :node-index
-         new-start-offset :node-offset} (text-index->node-index-and-offset new-sibling-nodes start-text-offset)
-        {new-end-index    :node-index
-         new-end-offset   :node-offset} (text-index->node-index-and-offset new-sibling-nodes end-text-offset)
-        new-start-point   {:path   (conj parent-path new-start-index)
-                           :offset new-start-offset}
-        new-end-point     {:path   (conj parent-path new-end-index)
-                           :offset new-end-offset}
-        [anchor focus]    (if (backwards-selection? state)
-                            [new-end-point new-start-point]
-                            [new-start-point new-end-point])
-        new-content       (hickory-update-in content parent-path
-                                             (fn [parent-node]
-                                               (assoc parent-node :content new-sibling-nodes)))]
-    (merge state {:content new-content
-                  :anchor  anchor
-                  :focus   focus})))
+        start-parent-path   (vec (butlast (:path start-point)))
+        start-parent-node   (hickory-get-in content start-parent-path)
+        end-parent-path     (vec (butlast (:path end-point)))
+        end-parent-node     (hickory-get-in content end-parent-path)
+        start-sibling-nodes (:content start-parent-node)
+        end-sibling-nodes   (:content end-parent-node)
+        start-index         (last (:path start-point))
+        end-index           (last (:path end-point))
+        start-text-offset   (node-index-and-offset->text-index start-sibling-nodes {:node-index  start-index
+                                                                                    :node-offset (:offset start-point)})
+        end-text-offset     (node-index-and-offset->text-index end-sibling-nodes {:node-index  end-index
+                                                                                  :node-offset (:offset end-point)})]
+    (if (= end-parent-path start-parent-path)
+      (let [new-sibling-nodes   (update-text-nodes start-sibling-nodes
+                                                   update-fn
+                                                   (:text-index start-text-offset)
+                                                   (:text-index end-text-offset))
+            {new-start-index  :node-index
+             new-start-offset :node-offset} (text-index->node-index-and-offset new-sibling-nodes start-text-offset)
+            {new-end-index    :node-index
+             new-end-offset   :node-offset} (text-index->node-index-and-offset new-sibling-nodes end-text-offset)
+            new-start-point   {:path   (conj start-parent-path new-start-index)
+                               :offset new-start-offset}
+            new-end-point     {:path   (conj end-parent-path new-end-index)
+                               :offset new-end-offset}
+            [anchor focus]    (if (backwards-selection? state)
+                                [new-end-point new-start-point]
+                                [new-start-point new-end-point])
+            new-content       (hickory-update-in content start-parent-path
+                                                 (fn [parent-node]
+                                                   (assoc parent-node :content new-sibling-nodes)))]
+        (merge state {:content new-content
+                      :anchor  anchor
+                      :focus   focus}))
+      (let [new-start-sibling-nodes (update-text-nodes start-sibling-nodes
+                                                       update-fn
+                                                       (:text-index start-text-offset))
+            new-end-sibling-nodes   (update-text-nodes end-sibling-nodes
+                                                       update-fn
+                                                       0
+                                                       (:text-index end-text-offset))
+            {new-start-index  :node-index
+             new-start-offset :node-offset} (text-index->node-index-and-offset new-start-sibling-nodes start-text-offset)
+            {new-end-index    :node-index
+             new-end-offset   :node-offset} (text-index->node-index-and-offset new-end-sibling-nodes end-text-offset)
+            new-start-point   {:path   (conj start-parent-path new-start-index)
+                               :offset new-start-offset}
+            new-end-point     {:path   (conj end-parent-path new-end-index)
+                               :offset new-end-offset}
+            [anchor focus]    (if (backwards-selection? state)
+                                [new-end-point new-start-point]
+                                [new-start-point new-end-point])
+            new-content       (-> content
+                                  (hickory-update-in start-parent-path
+                                                     (fn [parent-node]
+                                                       (assoc parent-node :content new-start-sibling-nodes)))
+                                  (hickory-update-in end-parent-path
+                                                     (fn [parent-node]
+                                                       (assoc parent-node :content new-end-sibling-nodes))))]
+        (merge state {:content new-content
+                      :anchor  anchor
+                      :focus   focus})))))
 
 (tests
  "Select a word and make it bold"
