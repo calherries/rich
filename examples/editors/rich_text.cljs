@@ -6,6 +6,8 @@
 
 (defonce state (r/atom nil))
 
+;; (comment (dissoc @state :history :command-history))
+
 (defn rich-text-editor []
   [rich/editable
    {:state       state
@@ -42,8 +44,10 @@
                   :white-space   "pre-wrap"
                   :overflow-wrap "break-word"}}
     (-> @state
-        :content
-        rich/minimized-hickory
-        rich/hickory->hiccup
+        (update :content (fn [content] (-> content
+                                           #_rich/minimized-hickory
+                                           rich/hickory->hiccup)))
+        (dissoc :history :command-history)
         pprint/pprint
-        with-out-str)]])
+        with-out-str)
+    ]])

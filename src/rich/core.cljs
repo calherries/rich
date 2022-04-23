@@ -63,7 +63,7 @@
   (update-subvec v (fn [] []) start end))
 
 (tests
- (update-subvec [0 1 2 3] 1 3 (fn [xs] (map #(* 100 %) xs)))
+ (update-subvec [0 1 2 3] (fn [xs] (map #(* 100 %) xs)) 1 3)
  := [0 100 200 3]
  (replace-subvec [0 1 2 3] 1 3 [100])
  := [0 100 3]
@@ -438,13 +438,17 @@
   ([text-nodes update-fn start-text-offset]
    (update-text-nodes text-nodes update-fn start-text-offset nil))
   ([text-nodes update-fn start-text-offset end-text-offset]
-   (-> text-nodes
-       (text-nodes->marked-text)
-       (update-subvec (fn [marked-text]
-                        (update-marked-text-attrs marked-text update-fn))
-                      start-text-offset
-                      end-text-offset)
-       (marked-text->text-nodes))))
+   (let [marked-text (-> text-nodes
+                         (text-nodes->marked-text))]
+     (if (empty? marked-text)
+       (mapv update-fn text-nodes)
+       (-> text-nodes
+           (text-nodes->marked-text)
+           (update-subvec (fn [marked-text]
+                            (update-marked-text-attrs marked-text update-fn))
+                          start-text-offset
+                          end-text-offset)
+           (marked-text->text-nodes))))))
 
 ;; The following two functions map a point in a vector of text nodes
 ;; to an index in an array of characters, and vice versa.
@@ -547,10 +551,22 @@
     []
     (conj (path-to-zip (zip/up zipper)) (count (zip/lefts zipper)))))
 
+(defn branch-zips-after
+  "Returns all leaf nodes after loc, inclusive."
+  [loc]
+  (filter zip/branch?
+          (take-while (complement zip/end?)
+                      (iterate zip/next loc))))
+
 (defn leaf-zips-between
   "Returns all leaf zippers between start-path and end-path, inclusive."
   [zipper start-path end-path]
   (take-until (fn [z] (= (path-to-zip z) end-path)) (leaf-zips-after (zip-get-in zipper start-path))))
+
+(defn branch-zips-between
+  "Returns all branch zippers between start-path and end-path, exclusive of the end-path."
+  [zipper start-path end-path]
+  (take-until (fn [z] (lexicographic-less-than (path-to-zip z) end-path)) (branch-zips-after (zip-get-in zipper start-path))))
 
 (defn paths-between
   "All paths between start-path and end-path"
@@ -566,7 +582,10 @@
  (mapv zip/node (leaf-zips-after (zip-get-in example-zip [1 1 0]))) := [0 1 3 4]
  (path-to-zip (zip-get-in example-zip [1 1 0])) := [1 1 0]
  (mapv zip/node (leaf-zips-between example-zip [1 1 0] [1 2])) := [0 1 3]
- (paths-between example-zip [1 1 0] [1 2]) := '([1 1 0] [1 1 1] [1 2]))
+ (paths-between example-zip [1 1 0] [1 2]) := '([1 1 0] [1 1 1] [1 2])
+ (path-to-zip (first (branch-zips-between example-zip [1 0] [1 2])))
+ (branch-paths-between example-zip [1 0] [1 2])
+ )
 
 
 ;;;;;;;;;;;;;;;;;;
@@ -813,6 +832,12 @@
       (let [new-start-sibling-nodes (update-text-nodes start-sibling-nodes
                                                        update-fn
                                                        (:text-index start-text-offset))
+            between-branch-zippers  (branch-zips-between (hickory-zip content) (:path start-point) (:path end-point))
+            between-paths-and-nodes (for [zip between-branch-zippers]
+                                      (let [text-nodes (:content (zip/node zip))]
+                                        {:path       (path-to-zip zip)
+                                         :text-nodes (update-text-nodes text-nodes
+                                                                        update-fn)}))
             new-end-sibling-nodes   (update-text-nodes end-sibling-nodes
                                                        update-fn
                                                        0
@@ -828,13 +853,18 @@
             [anchor focus]    (if (backwards-selection? state)
                                 [new-end-point new-start-point]
                                 [new-start-point new-end-point])
-            new-content       (-> content
-                                  (hickory-update-in start-parent-path
-                                                     (fn [parent-node]
-                                                       (assoc parent-node :content new-start-sibling-nodes)))
-                                  (hickory-update-in end-parent-path
-                                                     (fn [parent-node]
-                                                       (assoc parent-node :content new-end-sibling-nodes))))]
+            new-paths-and-nodes   (into #{{:path start-parent-path
+                                           :text-nodes new-start-sibling-nodes}
+                                          {:path end-parent-path
+                                           :text-nodes new-end-sibling-nodes}}
+                                        between-paths-and-nodes)
+            new-content       (reduce (fn [content {:keys [path text-nodes]}]
+                                        (hickory-update-in content
+                                                           path
+                                                           (fn [parent-node]
+                                                             (assoc parent-node :content text-nodes))))
+                                      content
+                                      new-paths-and-nodes)]
         (merge state {:content new-content
                       :anchor  anchor
                       :focus   focus})))))
@@ -887,10 +917,10 @@
                                                                               :node-offset (:offset start-point)})
           new-sibling-nodes (-> sibling-nodes
                                 (text-nodes->marked-text)
-                                (update-subvec (:text-index start-text-offset)
+                                (update-subvec (fn [_]
+                                                 marked-text)
                                                (:text-index start-text-offset)
-                                               (fn [_]
-                                                 marked-text))
+                                               (:text-index start-text-offset))
                                 (marked-text->text-nodes))
           new-character-index (+ (count marked-text)
                                  (:text-index start-text-offset))
@@ -1291,9 +1321,9 @@
   [content]
   (-> (walk/prewalk (fn [node]
                       (cond
-                        (:tag node)
+                        (text-node? node)
                         (-> node
-                            (assoc-in [:attrs :data-rich-node] true)
+                            (assoc-in [:attrs :data-rich-text] true)
                             (update :content (fn [content]
                                                (if (= content [""])
                                                  ["\uFEFF"]
@@ -1349,12 +1379,22 @@
   []
   (let [selection (.getSelection js/window)]
     (when (some-> selection .-anchorNode .-parentElement element-in-editable?)
-      {:anchor {:path   (path-to-element (.-parentElement (.-anchorNode selection)) root-element?)
+      {:anchor {:path   (let [node (.-anchorNode selection)
+                              node (if (= (.-nodeType node) 3)
+                                     ;; If the selection is a DOM text node, select the parent
+                                     (.-parentNode node)
+                                     ;; Find the first descendant DOM text node parent
+                                     (.querySelector node "[data-rich-text]"))]
+                          (path-to-element node root-element?))
                 :offset (if (= (.-textContent (.-anchorNode selection)) "\uFEFF")
                           ;; If the text at the point is an empty character, the offset is zero, not one.
                           0
                           (.-anchorOffset selection))}
-       :focus  {:path   (path-to-element (.-parentElement (.-focusNode selection)) root-element?)
+       :focus  {:path   (let [node (.-focusNode selection)
+                              node (if (= (.-nodeType node) 3)
+                                     (.-parentNode node)
+                                     (.querySelector node "[data-rich-text]"))]
+                          (path-to-element node root-element?))
                 :offset (if (= (.-textContent (.-focusNode selection)) "\uFEFF")
                           ;; If the text at the point is an empty character, the offset is zero, not one.
                           0
