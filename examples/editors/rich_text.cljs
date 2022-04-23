@@ -6,8 +6,6 @@
 
 (defonce state (r/atom nil))
 
-;; (comment (dissoc @state :history :command-history))
-
 (defn rich-text-editor []
   [rich/editable
    {:state       state
