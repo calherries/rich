@@ -43,7 +43,7 @@
                   :overflow-wrap "break-word"}}
     (-> @state
         (update :content (fn [content] (-> content
-                                           #_rich/minimized-hickory
+                                           rich/minimized-hickory
                                            rich/hickory->hiccup)))
         (dissoc :history :command-history)
         pprint/pprint

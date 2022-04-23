@@ -441,7 +441,8 @@
    (let [marked-text (-> text-nodes
                          (text-nodes->marked-text))]
      (if (empty? marked-text)
-       (mapv update-fn text-nodes)
+       (mapv (fn [text-node] (update text-node :attrs update-fn))
+             text-nodes)
        (-> text-nodes
            (text-nodes->marked-text)
            (update-subvec (fn [marked-text]
@@ -449,6 +450,16 @@
                           start-text-offset
                           end-text-offset)
            (marked-text->text-nodes))))))
+
+(tests
+ "Updating text nodes with empty content should preserve the empty content, but still update the node."
+ (update-text-nodes [{:attrs {}, :content [""], :tag :span, :type :element}]
+                    #(assoc % :attrs {:style {:font-weight "bold"}}))
+ := [{:attrs {:attrs {:style {:font-weight "bold"}}},
+      :content [""],
+      :tag :span,
+      :type :element}]
+ )
 
 ;; The following two functions map a point in a vector of text nodes
 ;; to an index in an array of characters, and vice versa.
