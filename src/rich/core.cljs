@@ -28,9 +28,31 @@
 ;; VECTORS
 
 (defn lexicographic-less-than
-  "Like <, but also compares (deeply-nested) vectors lexicographically."
+  "Like <, but also compares vectors lexicographically."
   [a b]
-  (= (compare a b) -1))
+  (cond
+    (and (seq a) (seq b)
+         (< (first a) (first b)))
+    true
+    (and (seq a) (seq b)
+         (= (first a) (first b)))
+    (lexicographic-less-than (rest a) (rest b))
+    (and (seq a) (seq b)
+         (> (first a) (first b)))
+    false
+    (and (seq a) (empty? b))
+    false
+    (and (empty? a) (seq b))
+    true
+    (and (empty? a) (empty? b))
+    false))
+
+(tests
+ (lexicographic-less-than [3] [3 1]) := true
+ (lexicographic-less-than [0 1] [0 1]) := false
+ (lexicographic-less-than [0 1] [0 2]) := true
+ (lexicographic-less-than [0 3] [0 2]) := false
+ )
 
 (defn vec-remove
   "Removes the element in this vector at this index."
@@ -586,7 +608,7 @@
 (defn branch-zips-between
   "Returns all branch zippers between start-path and end-path, exclusive of the end-path."
   [zipper start-path end-path]
-  (take-until (fn [z] (lexicographic-less-than (path-to-zip z) end-path)) (branch-zips-after (zip-get-in zipper start-path))))
+  (take-while (fn [z] (lexicographic-less-than (path-to-zip z) end-path)) (branch-zips-after (zip-get-in zipper start-path))))
 
 (defn paths-between
   "All paths between start-path and end-path"
@@ -603,8 +625,9 @@
  (path-to-zip (zip-get-in example-zip [1 1 0])) := [1 1 0]
  (mapv zip/node (leaf-zips-between example-zip [1 1 0] [1 2])) := [0 1 3]
  (paths-between example-zip [1 1 0] [1 2]) := '([1 1 0] [1 1 1] [1 2])
- (path-to-zip (first (branch-zips-between example-zip [1 0] [1 2])))
- (branch-paths-between example-zip [1 0] [1 2]))
+ (path-to-zip (first (branch-zips-after (zip-get-in example-zip [1 0]))))
+ (lexicographic-less-than [1 1] [1 2])
+ (branch-zips-between example-zip [1 0] [1 2]))
 
 
 
@@ -817,8 +840,8 @@
         end-index           (last (:path end-point))
         start-text-offset   (node-index-and-offset->text-index start-sibling-nodes {:node-index  start-index
                                                                                     :node-offset (:offset start-point)})
-        end-text-offset     (node-index-and-offset->text-index (p end-sibling-nodes) (q {:node-index  end-index
-                                                                                         :node-offset (:offset end-point)}))]
+        end-text-offset     (node-index-and-offset->text-index end-sibling-nodes {:node-index  end-index
+                                                                                  :node-offset (:offset end-point)})]
     (if (= end-parent-path start-parent-path)
       (let [new-sibling-nodes   (update-text-nodes start-sibling-nodes
                                                    update-fn
@@ -845,7 +868,7 @@
       (let [new-start-sibling-nodes (update-text-nodes start-sibling-nodes
                                                        update-fn
                                                        (:text-index start-text-offset))
-            between-branch-zippers  (branch-zips-between (hickory-zip content) (:path start-point) (:path end-point))
+            between-branch-zippers  (branch-zips-between (hickory-zip content) start-parent-path end-parent-path)
             between-paths-and-nodes (for [zip between-branch-zippers]
                                       (let [text-nodes (:content (zip/node zip))]
                                         {:path       (path-to-zip zip)
@@ -990,7 +1013,8 @@
   [state]
   (let [content                         (:content state)
         {:keys [start-point end-point]} (range-from-selection state)
-        end-path                        (if (zero? (:offset end-point))
+        end-path                        (if (and (not (zero? (last (:path end-point))))
+                                                 (zero? (:offset end-point)))
                                           (path-left (:path end-point))
                                           (:path end-point))]
     (universal-leaf-attrs content (:path start-point) end-path)))

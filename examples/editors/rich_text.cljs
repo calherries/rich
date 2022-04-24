@@ -1,6 +1,5 @@
 (ns editors.rich-text
-  (:require [hyperfiddle.rcf]
-            [rich.core :as rich]
+  (:require [rich.core :as rich]
             [reagent.core :as r]
             [clojure.pprint :as pprint]))
 
@@ -47,5 +46,4 @@
                                            rich/hickory->hiccup)))
         (dissoc :history :command-history)
         pprint/pprint
-        with-out-str)
-    ]])
+        with-out-str)]])

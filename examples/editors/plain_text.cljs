@@ -1,6 +1,5 @@
 (ns editors.plain-text
-  (:require [hyperfiddle.rcf]
-            [rich.core :as rich]
+  (:require [rich.core :as rich]
             [reagent.core :as r]
             [clojure.pprint :as pprint]))
 
