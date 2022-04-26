@@ -868,7 +868,7 @@
       (let [new-start-sibling-nodes (update-text-nodes start-sibling-nodes
                                                        update-fn
                                                        (:text-index start-text-offset))
-            between-branch-zippers  (branch-zips-between (hickory-zip content) start-parent-path end-parent-path)
+            between-branch-zippers  (rest (branch-zips-between (hickory-zip content) start-parent-path end-parent-path))
             between-paths-and-nodes (for [zip between-branch-zippers]
                                       (let [text-nodes (:content (zip/node zip))]
                                         {:path       (path-to-zip zip)
@@ -1116,6 +1116,61 @@
             (update :active-attrs deep-merge (assoc-in attrs-under-cursor attr-path value)))))))
 
 (tests
+ "Toggle bold across two lines, with an empty line in the middle"
+ (let [state {:anchor {:offset 3, :path [2 0]},
+              :content
+              {:attrs {},
+               :content
+               [{:attrs {},
+                 :content
+                 [{:attrs {}, :content ["Hello, "], :tag :span, :type :element}],
+                 :tag :div,
+                 :type :element}
+                {:attrs {},
+                 :content [{:attrs {}, :content [""], :tag :span, :type :element}],
+                 :tag :div,
+                 :type :element}
+                {:attrs {},
+                 :content [{:attrs {}, :content ["World!"], :tag :span, :type :element}],
+                 :tag :div,
+                 :type :element}],
+               :tag :div,
+               :type :element},
+              :focus {:offset 2, :path [0 0]}}
+       commands [[:selection-toggle-attribute [:style :font-weight] "bold"]]
+       state    (do-commands state commands)]
+   (select-keys state [:anchor :content :focus]))
+ := {:anchor {:offset 0, :path [2 1]},
+     :content
+     {:attrs {},
+      :content
+      [{:attrs {},
+        :content [{:attrs {}, :content ["He"], :tag :span, :type :element}
+                  {:attrs {:style {:font-weight "bold"}},
+                   :content ["llo, "],
+                   :tag :span,
+                   :type :element}],
+        :tag :div,
+        :type :element}
+       {:attrs {},
+        :content [{:attrs {:style {:font-weight "bold"}},
+                   :content [""],
+                   :tag :span,
+                   :type :element}],
+        :tag :div,
+        :type :element}
+       {:attrs {},
+        :content [{:attrs {:style {:font-weight "bold"}},
+                   :content ["Wor"],
+                   :tag :span,
+                   :type :element}
+                  {:attrs {}, :content ["ld!"], :tag :span, :type :element}],
+        :tag :div,
+        :type :element}],
+      :tag :div,
+      :type :element},
+     :focus {:offset 0, :path [0 1]}}
+
  "Set two active attributes under the cursor and start typing"
  (let [commands [[:set-selection
                   {:anchor {:path [0 0], :offset 15},
@@ -1123,7 +1178,7 @@
                  [:selection-toggle-attribute [:style :font-weight] "bold"]
                  [:selection-toggle-attribute [:style :font-style] "italic"]
                  [:insert-text "b"]]
-       state (do-commands initial-test-state commands)]
+       state    (do-commands initial-test-state commands)]
    (select-keys state [:anchor :content :focus]))
  := {:anchor {:offset 1, :path [0 1]},
      :content
@@ -1342,21 +1397,6 @@
       (assoc-in [:attrs :data-rich-root] true)))
 
 ;; FIXME: needs to take an editor identifier, so there can be more than one editor on the page
-(defn get-root-element []
-  (js/document.getElementById "rich-editable"))
-
-;; FIXME: needs to take an editor identifier, so there can be more than one editor on the page
-(defn find-element
-  "Finds the element in the DOM at this path."
-  [path]
-  (let [editor     (get-root-element)
-        start-node (-> editor .-childNodes (aget 0))]
-    (loop [node start-node
-           path path]
-      (if (seq path)
-        (recur (aget (.-childNodes node) (first path))
-               (rest path))
-        node))))
 
 (defn element-in-editable?
   "Returns the root element of the editable component"
@@ -1367,6 +1407,19 @@
   "Returns true if element is the root of the editable component's content"
   [element]
   (.hasAttribute element "data-rich-root"))
+
+(defn get-rich-root []
+  (.querySelector js/document "[data-rich-root]"))
+
+(defn find-element
+  "Finds the element in the DOM at this path."
+  [path]
+  (loop [node (get-rich-root)
+         path path]
+    (if (seq path)
+      (recur (aget (.-childNodes node) (first path))
+             (rest path))
+      node)))
 
 (defn index-from-parent
   "Returns the index of the element in its parent's children."
